@@ -1,0 +1,2578 @@
+# Fichiers Pro — gestionnaire de fichiers Android (APK native)
+# Mettre ce fichier dans GitHub : .github/workflows/fichiers-pro.yml
+# Puis : onglet Actions > "Construire Fichiers Pro" > Run workflow.
+# L'APK se télécharge dans l'onglet Actions > dernier build > Artifacts.
+
+name: Construire Fichiers Pro
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Installer Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Créer le projet Android
+        run: |
+          mkdir -p projet && cd projet
+          cat > settings.gradle << 'FIN_DU_FICHIER'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "FichiersPro"
+          include ':app'
+          FIN_DU_FICHIER
+          cat > build.gradle << 'FIN_DU_FICHIER'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          FIN_DU_FICHIER
+          cat > gradle.properties << 'FIN_DU_FICHIER'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.nonTransitiveRClass=true
+          FIN_DU_FICHIER
+          mkdir -p app
+          cat > app/build.gradle << 'FIN_DU_FICHIER'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.fichierspro.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.fichierspro.app'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              signingConfigs {
+                  release {
+                      storeFile file('release.jks')
+                      storePassword 'fichierspro'
+                      keyAlias 'fp'
+                      keyPassword 'fichierspro'
+                  }
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.release
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              lint {
+                  abortOnError false
+                  checkReleaseBuilds false
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml << 'FIN_DU_FICHIER'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+              <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:label="Fichiers Pro"
+                  android:requestLegacyExternalStorage="true"
+                  android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <activity
+                      android:name=".EditorActivity"
+                      android:exported="false"
+                      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+                      android:windowSoftInputMode="adjustResize" />
+
+                  <provider
+                      android:name=".FilesProvider"
+                      android:authorities="com.fichierspro.app.files"
+                      android:exported="false"
+                      android:grantUriPermissions="true" />
+              </application>
+          </manifest>
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/styles.xml << 'FIN_DU_FICHIER'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_bg">#14213D</color>
+              <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+                  <item name="android:colorPrimary">#1565C0</item>
+                  <item name="android:colorPrimaryDark">#0D47A1</item>
+                  <item name="android:colorAccent">#1565C0</item>
+              </style>
+              <style name="AppDark" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:colorPrimary">#1E88E5</item>
+                  <item name="android:colorPrimaryDark">#0D47A1</item>
+                  <item name="android:colorAccent">#64B5F6</item>
+              </style>
+          </resources>
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'FIN_DU_FICHIER'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_fg.xml << 'FIN_DU_FICHIER'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <group android:scaleX="0.66" android:scaleY="0.66" android:translateX="-124.2" android:translateY="-8.04">
+                  <path android:fillColor="#26C6DA" android:pathData="M238,50 h64 a6,6 0 0 1 6,6 v40 a6,6 0 0 1 -6,6 h-64 a6,6 0 0 1 -6,-6 v-40 a6,6 0 0 1 6,-6 z" />
+                  <path android:fillColor="#FF7043" android:pathData="M232,64 h76 a6,6 0 0 1 6,6 v44 a6,6 0 0 1 -6,6 h-76 a6,6 0 0 1 -6,-6 v-44 a6,6 0 0 1 6,-6 z" />
+                  <path android:fillColor="#FFCA28" android:pathData="M220,86 a6,6 0 0 1 6,-6 h22 l7,7 h53 a6,6 0 0 1 6,6 v38 a6,6 0 0 1 -6,6 h-82 a6,6 0 0 1 -6,-6 z" />
+                  <path android:fillColor="#14213D" android:fillAlpha="0.35" android:pathData="M247,110 h46 a3,3 0 0 1 3,3 v0 a3,3 0 0 1 -3,3 h-46 a3,3 0 0 1 -3,-3 v-0 a3,3 0 0 1 3,-3 z" />
+              </group>
+          </vector>
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/MainActivity.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.ActivityNotFoundException;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.content.pm.PackageManager;
+          import android.content.res.ColorStateList;
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.ColorDrawable;
+          import android.graphics.drawable.Drawable;
+          import android.graphics.drawable.GradientDrawable;
+          import android.media.ThumbnailUtils;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.os.StatFs;
+          import android.provider.MediaStore;
+          import android.provider.Settings;
+          import android.text.InputType;
+          import android.text.TextUtils;
+          import android.util.LruCache;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.view.Menu;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.WindowManager;
+          import android.webkit.MimeTypeMap;
+          import android.widget.BaseAdapter;
+          import android.widget.EditText;
+          import android.widget.FrameLayout;
+          import android.widget.HorizontalScrollView;
+          import android.widget.ImageView;
+          import android.widget.LinearLayout;
+          import android.widget.ListView;
+          import android.widget.PopupMenu;
+          import android.widget.ProgressBar;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileOutputStream;
+          import java.io.IOException;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.security.MessageDigest;
+          import java.text.SimpleDateFormat;
+          import java.util.ArrayDeque;
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.Collections;
+          import java.util.Date;
+          import java.util.Enumeration;
+          import java.util.HashMap;
+          import java.util.HashSet;
+          import java.util.Iterator;
+          import java.util.LinkedHashSet;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.Set;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          import java.util.zip.ZipEntry;
+          import java.util.zip.ZipFile;
+          import java.util.zip.ZipOutputStream;
+
+          public class MainActivity extends Activity {
+
+              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3;
+
+              static final Set<String> IMG = set("jpg jpeg png gif bmp webp heic heif");
+              static final Set<String> VID = set("mp4 mkv avi mov 3gp webm flv wmv m4v ts");
+              static final Set<String> AUD = set("mp3 wav ogg m4a aac flac amr opus wma mid");
+              static final Set<String> DOC = set("pdf doc docx xls xlsx ppt pptx txt odt ods odp rtf csv epub");
+              static final Set<String> APK = set("apk xapk apks");
+              static final Set<String> ARC = set("zip rar 7z tar gz bz2 xz tgz");
+              static final Set<String> TXT = set("txt md log json csv xml ini conf cfg yml yaml properties sh py java js css c cpp h kt sql bat srt gradle");
+
+              int mode = M_HOME;
+              File currentDir;
+              File prevDir;
+              String subText = "";
+              String listTitle = "";
+              final ArrayList<File> items = new ArrayList<>();
+              final HashMap<String, Integer> childCount = new HashMap<>();
+              final LinkedHashSet<File> selected = new LinkedHashSet<>();
+              final ArrayList<File> clipboard = new ArrayList<>();
+              boolean clipCut;
+              boolean waitingPerm;
+
+              SharedPreferences prefs;
+              final Handler ui = new Handler(Looper.getMainLooper());
+              final ExecutorService bg = Executors.newCachedThreadPool();
+              final ExecutorService thumbExec = Executors.newFixedThreadPool(3);
+              final Set<String> thumbPending = Collections.synchronizedSet(new HashSet<String>());
+              final Set<String> thumbFailed = Collections.synchronizedSet(new HashSet<String>());
+              LruCache<String, Bitmap> thumbs;
+              volatile int scanGen = 0;
+
+              boolean dark;
+              int cBg, cCard, cText, cSub, cPrimary, cDivider, cSel;
+
+              LinearLayout root, topActions, bottomBar, crumbs;
+              TextView tvTitle, tvSub, btnBack, emptyView, fab;
+              HorizontalScrollView crumbScroll;
+              FrameLayout content;
+              ListView listView;
+              FileAdapter adapter;
+              ProgressBar loading;
+
+              static Set<String> set(String s) {
+                  return new HashSet<>(Arrays.asList(s.split(" ")));
+              }
+
+              // ---------------------------------------------------------------- cycle de vie
+
+              @Override
+              protected void onCreate(Bundle state) {
+                  prefs = getSharedPreferences("fp", MODE_PRIVATE);
+                  dark = prefs.getBoolean("dark", false);
+                  setTheme(dark ? R.style.AppDark : R.style.AppTheme);
+                  super.onCreate(state);
+                  setupColors();
+                  int max = (int) (Runtime.getRuntime().maxMemory() / 1024 / 8);
+                  thumbs = new LruCache<String, Bitmap>(max) {
+                      @Override
+                      protected int sizeOf(String k, Bitmap b) {
+                          return Math.max(1, b.getByteCount() / 1024);
+                      }
+                  };
+                  getWindow().setStatusBarColor(darker(cPrimary));
+                  getWindow().setNavigationBarColor(cCard);
+                  buildUi();
+                  if (!hasPerm()) {
+                      showPermScreen();
+                      return;
+                  }
+                  String last = state != null ? state.getString("dir") : null;
+                  if (last != null && new File(last).isDirectory()) browse(new File(last), null);
+                  else showHome();
+              }
+
+              @Override
+              protected void onSaveInstanceState(Bundle out) {
+                  super.onSaveInstanceState(out);
+                  if (mode == M_BROWSE && currentDir != null) out.putString("dir", currentDir.getAbsolutePath());
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (waitingPerm && hasPerm()) {
+                      waitingPerm = false;
+                      showHome();
+                  } else if (mode == M_BROWSE && selected.isEmpty()) {
+                      loadDir(currentDir, listView.getFirstVisiblePosition(), null);
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  scanGen++;
+                  bg.shutdownNow();
+                  thumbExec.shutdownNow();
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (!selected.isEmpty()) {
+                      selected.clear();
+                      refreshSelectionUi();
+                      return;
+                  }
+                  if (mode == M_BROWSE) {
+                      File r = rootOf(currentDir);
+                      File parent = currentDir.getParentFile();
+                      if (currentDir.equals(r) || parent == null) showHome();
+                      else browse(parent, currentDir);
+                      return;
+                  }
+                  if (mode == M_LIST || mode == M_TRASH) {
+                      if (prevDir != null) {
+                          File p = prevDir;
+                          prevDir = null;
+                          browse(p, null);
+                      } else showHome();
+                      return;
+                  }
+                  super.onBackPressed();
+              }
+
+              // ---------------------------------------------------------------- couleurs & aides
+
+              void setupColors() {
+                  if (dark) {
+                      cBg = 0xFF121417; cCard = 0xFF1E2227; cText = 0xFFECEFF1; cSub = 0xFF9AA4AE;
+                      cPrimary = 0xFF1E88E5; cDivider = 0xFF2A2F35; cSel = 0x553D8BFF;
+                  } else {
+                      cBg = 0xFFF3F6FA; cCard = 0xFFFFFFFF; cText = 0xFF1A1F24; cSub = 0xFF6B7682;
+                      cPrimary = 0xFF1565C0; cDivider = 0xFFE3E8EE; cSel = 0x332979FF;
+                  }
+              }
+
+              static int darker(int c) {
+                  return Color.rgb((int) (Color.red(c) * 0.8), (int) (Color.green(c) * 0.8), (int) (Color.blue(c) * 0.8));
+              }
+
+              int dp(float v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              Drawable ripple(boolean borderless) {
+                  TypedValue tv = new TypedValue();
+                  getTheme().resolveAttribute(borderless ? android.R.attr.selectableItemBackgroundBorderless
+                          : android.R.attr.selectableItemBackground, tv, true);
+                  return getDrawable(tv.resourceId);
+              }
+
+              GradientDrawable round(int color, float r) {
+                  GradientDrawable g = new GradientDrawable();
+                  g.setColor(color);
+                  g.setCornerRadius(dp(r));
+                  return g;
+              }
+
+              TextView text(String s, float sp, int color, boolean bold) {
+                  TextView t = new TextView(this);
+                  t.setText(s);
+                  t.setTextSize(sp);
+                  t.setTextColor(color);
+                  if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+                  return t;
+              }
+
+              TextView iconBtn(String s, View.OnClickListener l) {
+                  TextView t = text(s, 21, Color.WHITE, false);
+                  t.setGravity(Gravity.CENTER);
+                  t.setMinWidth(dp(44));
+                  t.setPadding(dp(10), dp(6), dp(10), dp(6));
+                  t.setBackground(ripple(true));
+                  t.setOnClickListener(l);
+                  return t;
+              }
+
+              void toast(String s) {
+                  Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+              }
+
+              static String ext(File f) {
+                  String n = f.getName();
+                  int i = n.lastIndexOf('.');
+                  return i > 0 ? n.substring(i + 1).toLowerCase(Locale.ROOT) : "";
+              }
+
+              static String mimeOf(File f) {
+                  String e = ext(f);
+                  if (e.equals("apk")) return "application/vnd.android.package-archive";
+                  String m = MimeTypeMap.getSingleton().getMimeTypeFromExtension(e);
+                  return m != null ? m : "*/*";
+              }
+
+              static String fmtSize(long b) {
+                  if (b < 1024) return b + " o";
+                  String[] u = {"Ko", "Mo", "Go", "To"};
+                  double v = b;
+                  int i = -1;
+                  do {
+                      v /= 1024;
+                      i++;
+                  } while (v >= 1024 && i < u.length - 1);
+                  return String.format(Locale.FRANCE, v < 10 ? "%.2f %s" : (v < 100 ? "%.1f %s" : "%.0f %s"), v, u[i]);
+              }
+
+              static String fmtDate(long t) {
+                  return new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(new Date(t));
+              }
+
+              String displayName(File f) {
+                  if (mode == M_TRASH) return f.getName().replaceFirst("^\\d+_\\d+_", "");
+                  String n = f.getName();
+                  return n.isEmpty() ? "/" : n;
+              }
+
+              String emoji(File f) {
+                  if (f.isDirectory()) return "📁";
+                  String e = ext(f);
+                  if (IMG.contains(e)) return "🖼";
+                  if (VID.contains(e)) return "🎬";
+                  if (AUD.contains(e)) return "🎵";
+                  if (e.equals("pdf")) return "📕";
+                  if (e.startsWith("doc") || e.equals("odt") || e.equals("rtf")) return "📘";
+                  if (e.startsWith("xls") || e.equals("csv") || e.equals("ods")) return "📗";
+                  if (e.startsWith("ppt") || e.equals("odp")) return "📙";
+                  if (APK.contains(e)) return "🤖";
+                  if (ARC.contains(e)) return "🗜";
+                  if (e.equals("html") || e.equals("htm")) return "🌐";
+                  if (TXT.contains(e)) return "📝";
+                  return "📄";
+              }
+
+              int typeColor(File f) {
+                  if (f.isDirectory()) return 0xFFFFB300;
+                  String e = ext(f);
+                  if (IMG.contains(e)) return 0xFF43A047;
+                  if (VID.contains(e)) return 0xFFE53935;
+                  if (AUD.contains(e)) return 0xFF8E24AA;
+                  if (APK.contains(e)) return 0xFF7CB342;
+                  if (ARC.contains(e)) return 0xFF6D4C41;
+                  if (DOC.contains(e)) return 0xFF1E88E5;
+                  return 0xFF78909C;
+              }
+
+              static int soft(int c) {
+                  return (c & 0x00FFFFFF) | 0x33000000;
+              }
+
+              // ---------------------------------------------------------------- préférences
+
+              boolean showHidden() {
+                  return prefs.getBoolean("hidden", false);
+              }
+
+              Set<String> favorites() {
+                  return new LinkedHashSet<>(prefs.getStringSet("fav", new HashSet<String>()));
+              }
+
+              void setFav(File f, boolean on) {
+                  Set<String> s = favorites();
+                  if (on) s.add(f.getAbsolutePath());
+                  else s.remove(f.getAbsolutePath());
+                  prefs.edit().putStringSet("fav", s).apply();
+                  toast(on ? "Ajouté aux favoris" : "Retiré des favoris");
+              }
+
+              List<String> recents() {
+                  String r = prefs.getString("rec", "");
+                  ArrayList<String> out = new ArrayList<>();
+                  for (String s : r.split("\n")) if (!s.isEmpty()) out.add(s);
+                  return out;
+              }
+
+              void addRecent(File f) {
+                  List<String> r = recents();
+                  r.remove(f.getAbsolutePath());
+                  r.add(0, f.getAbsolutePath());
+                  while (r.size() > 15) r.remove(r.size() - 1);
+                  prefs.edit().putString("rec", TextUtils.join("\n", r)).apply();
+              }
+
+              // ---------------------------------------------------------------- stockage
+
+              File internalRoot() {
+                  return Environment.getExternalStorageDirectory();
+              }
+
+              File trashDir() {
+                  return new File(internalRoot(), ".CorbeilleFichiersPro");
+              }
+
+              List<File> storageRoots() {
+                  ArrayList<File> out = new ArrayList<>();
+                  out.add(internalRoot());
+                  File[] dirs = getExternalFilesDirs(null);
+                  if (dirs != null) {
+                      for (int i = 1; i < dirs.length; i++) {
+                          if (dirs[i] == null) continue;
+                          String p = dirs[i].getAbsolutePath();
+                          int k = p.indexOf("/Android/data");
+                          if (k > 0) {
+                              File r = new File(p.substring(0, k));
+                              if (!out.contains(r)) out.add(r);
+                          }
+                      }
+                  }
+                  return out;
+              }
+
+              File rootOf(File f) {
+                  String p = f.getAbsolutePath();
+                  for (File r : storageRoots()) {
+                      String rp = r.getAbsolutePath();
+                      if (p.equals(rp) || p.startsWith(rp + "/")) return r;
+                  }
+                  return new File("/");
+              }
+
+              // ---------------------------------------------------------------- permission
+
+              boolean hasPerm() {
+                  if (Build.VERSION.SDK_INT >= 30) return Environment.isExternalStorageManager();
+                  return checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              void requestPerm() {
+                  if (Build.VERSION.SDK_INT >= 30) {
+                      waitingPerm = true;
+                      try {
+                          Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                          i.setData(Uri.parse("package:" + getPackageName()));
+                          startActivity(i);
+                      } catch (Exception e) {
+                          startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                      }
+                  } else {
+                      requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
+                              Manifest.permission.WRITE_EXTERNAL_STORAGE}, 7);
+                  }
+              }
+
+              @Override
+              public void onRequestPermissionsResult(int code, String[] p, int[] r) {
+                  super.onRequestPermissionsResult(code, p, r);
+                  if (hasPerm()) showHome();
+                  else toast("Permission refusée");
+              }
+
+              void showPermScreen() {
+                  mode = M_PERM;
+                  tvTitle.setText("Fichiers Pro");
+                  tvSub.setText("Autorisation nécessaire");
+                  btnBack.setVisibility(View.GONE);
+                  crumbScroll.setVisibility(View.GONE);
+                  topActions.removeAllViews();
+                  bottomBar.setVisibility(View.GONE);
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setGravity(Gravity.CENTER);
+                  col.setPadding(dp(32), dp(32), dp(32), dp(32));
+                  TextView ic = text("📂", 72, cText, false);
+                  ic.setGravity(Gravity.CENTER);
+                  col.addView(ic);
+                  TextView t = text("Accès à tous les fichiers", 22, cText, true);
+                  t.setGravity(Gravity.CENTER);
+                  t.setPadding(0, dp(16), 0, dp(8));
+                  col.addView(t);
+                  TextView m = text("Pour gérer vos fichiers (copier, déplacer, supprimer, compresser…), "
+                          + "Fichiers Pro a besoin de l'autorisation « Accès à tous les fichiers ».\n\n"
+                          + "Activez-la sur l'écran suivant puis revenez dans l'application.", 15, cSub, false);
+                  m.setGravity(Gravity.CENTER);
+                  col.addView(m);
+                  TextView b = text("Autoriser l'accès", 16, Color.WHITE, true);
+                  b.setGravity(Gravity.CENTER);
+                  b.setPadding(dp(28), dp(14), dp(28), dp(14));
+                  b.setBackground(round(cPrimary, 28));
+                  b.setForeground(ripple(false));
+                  b.setOnClickListener(v -> requestPerm());
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+                  lp.topMargin = dp(28);
+                  col.addView(b, lp);
+                  content.removeAllViews();
+                  content.addView(col, new FrameLayout.LayoutParams(-1, -1));
+              }
+
+              // ---------------------------------------------------------------- interface
+
+              void buildUi() {
+                  root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setBackgroundColor(cBg);
+
+                  LinearLayout top = new LinearLayout(this);
+                  top.setOrientation(LinearLayout.HORIZONTAL);
+                  top.setGravity(Gravity.CENTER_VERTICAL);
+                  top.setBackgroundColor(cPrimary);
+                  top.setPadding(dp(4), dp(8), dp(4), dp(8));
+                  top.setElevation(dp(4));
+                  btnBack = iconBtn("←", v -> onBackPressed());
+                  top.addView(btnBack);
+                  LinearLayout tcol = new LinearLayout(this);
+                  tcol.setOrientation(LinearLayout.VERTICAL);
+                  tcol.setPadding(dp(8), 0, 0, 0);
+                  tvTitle = text("Fichiers Pro", 19, Color.WHITE, true);
+                  tvTitle.setSingleLine(true);
+                  tvTitle.setEllipsize(TextUtils.TruncateAt.END);
+                  tvSub = text("", 12, 0xDDFFFFFF, false);
+                  tvSub.setSingleLine(true);
+                  tvSub.setEllipsize(TextUtils.TruncateAt.START);
+                  tcol.addView(tvTitle);
+                  tcol.addView(tvSub);
+                  top.addView(tcol, new LinearLayout.LayoutParams(0, -2, 1));
+                  topActions = new LinearLayout(this);
+                  topActions.setOrientation(LinearLayout.HORIZONTAL);
+                  top.addView(topActions);
+                  root.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+                  crumbScroll = new HorizontalScrollView(this);
+                  crumbScroll.setHorizontalScrollBarEnabled(false);
+                  crumbScroll.setBackgroundColor(cCard);
+                  crumbs = new LinearLayout(this);
+                  crumbs.setOrientation(LinearLayout.HORIZONTAL);
+                  crumbs.setGravity(Gravity.CENTER_VERTICAL);
+                  crumbs.setPadding(dp(8), dp(4), dp(8), dp(4));
+                  crumbScroll.addView(crumbs);
+                  root.addView(crumbScroll, new LinearLayout.LayoutParams(-1, -2));
+
+                  content = new FrameLayout(this);
+                  root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+
+                  bottomBar = new LinearLayout(this);
+                  bottomBar.setOrientation(LinearLayout.HORIZONTAL);
+                  bottomBar.setGravity(Gravity.CENTER_VERTICAL);
+                  bottomBar.setBackgroundColor(cCard);
+                  bottomBar.setElevation(dp(8));
+                  bottomBar.setVisibility(View.GONE);
+                  root.addView(bottomBar, new LinearLayout.LayoutParams(-1, -2));
+                  setContentView(root);
+
+                  listView = new ListView(this);
+                  listView.setDivider(new ColorDrawable(cDivider));
+                  listView.setDividerHeight(1);
+                  listView.setFastScrollEnabled(true);
+                  listView.setPadding(0, 0, 0, dp(88));
+                  listView.setClipToPadding(false);
+                  adapter = new FileAdapter();
+                  listView.setAdapter(adapter);
+                  listView.setOnItemClickListener((p, v, pos, id) -> {
+                      if (pos < items.size()) onItemClick(items.get(pos));
+                  });
+                  listView.setOnItemLongClickListener((p, v, pos, id) -> {
+                      if (pos < items.size() && mode != M_PERM) toggleSelect(items.get(pos));
+                      return true;
+                  });
+
+                  emptyView = text("", 16, cSub, false);
+                  emptyView.setGravity(Gravity.CENTER);
+                  loading = new ProgressBar(this);
+
+                  fab = text("+", 30, Color.WHITE, false);
+                  fab.setGravity(Gravity.CENTER);
+                  GradientDrawable ov = new GradientDrawable();
+                  ov.setShape(GradientDrawable.OVAL);
+                  ov.setColor(cPrimary);
+                  fab.setBackground(ov);
+                  fab.setForeground(ripple(true));
+                  fab.setElevation(dp(6));
+                  fab.setOnClickListener(this::newMenu);
+              }
+
+              void showListUi(String title, boolean withCrumbs, boolean withFab) {
+                  listTitle = title;
+                  tvTitle.setText(title);
+                  btnBack.setVisibility(View.VISIBLE);
+                  crumbScroll.setVisibility(withCrumbs ? View.VISIBLE : View.GONE);
+                  content.removeAllViews();
+                  content.addView(listView, new FrameLayout.LayoutParams(-1, -1));
+                  content.addView(emptyView, new FrameLayout.LayoutParams(-1, -1));
+                  content.addView(loading, new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
+                  if (withFab) {
+                      FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(58), dp(58), Gravity.BOTTOM | Gravity.END);
+                      lp.setMargins(0, 0, dp(18), dp(18));
+                      content.addView(fab, lp);
+                  }
+                  emptyView.setVisibility(View.GONE);
+                  loading.setVisibility(View.VISIBLE);
+                  items.clear();
+                  adapter.notifyDataSetChanged();
+                  updateHeader();
+              }
+
+              void updateEmpty() {
+                  boolean show = items.isEmpty() && loading.getVisibility() != View.VISIBLE;
+                  emptyView.setText(mode == M_TRASH ? "🗑\n\nLa corbeille est vide"
+                          : mode == M_LIST ? "🔎\n\nAucun résultat" : "📂\n\nDossier vide");
+                  emptyView.setVisibility(show ? View.VISIBLE : View.GONE);
+              }
+
+              void updateHeader() {
+                  topActions.removeAllViews();
+                  if (!selected.isEmpty()) {
+                      btnBack.setVisibility(View.VISIBLE);
+                      btnBack.setText("✕");
+                      tvTitle.setText(selected.size() + " sélectionné(s)");
+                      tvSub.setText("Appui long ou appui pour sélectionner");
+                      topActions.addView(iconBtn("☑", v -> selectAll()));
+                  } else {
+                      btnBack.setText("←");
+                      switch (mode) {
+                          case M_HOME:
+                              tvTitle.setText("Fichiers Pro");
+                              tvSub.setText("Gestionnaire de fichiers");
+                              break;
+                          case M_BROWSE:
+                              String n = currentDir.equals(internalRoot()) ? "Stockage interne" : displayName(currentDir);
+                              tvTitle.setText(n);
+                              tvSub.setText(subText);
+                              break;
+                          default:
+                              tvTitle.setText(listTitle);
+                              tvSub.setText(subText);
+                      }
+                      if (mode != M_TRASH && mode != M_PERM) topActions.addView(iconBtn("🔍", v -> askSearch()));
+                      if (mode != M_PERM) topActions.addView(iconBtn("⋮", this::mainMenu));
+                  }
+                  updateBottom();
+              }
+
+              TextView bottomBtn(String icon, String label, View.OnClickListener l) {
+                  TextView t = new TextView(this);
+                  t.setText(icon + "\n" + label);
+                  t.setTextColor(cText);
+                  t.setTextSize(11);
+                  t.setGravity(Gravity.CENTER);
+                  t.setPadding(dp(2), dp(8), dp(2), dp(8));
+                  t.setBackground(ripple(false));
+                  t.setOnClickListener(l);
+                  bottomBar.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+                  return t;
+              }
+
+              void updateBottom() {
+                  bottomBar.removeAllViews();
+                  if (!selected.isEmpty()) {
+                      if (mode == M_TRASH) {
+                          bottomBtn("♻", "Restaurer", v -> restore(new ArrayList<>(selected)));
+                          bottomBtn("🗑", "Supprimer", v -> deletePermanent(new ArrayList<>(selected)));
+                      } else {
+                          bottomBtn("📋", "Copier", v -> setClip(false));
+                          bottomBtn("✂", "Couper", v -> setClip(true));
+                          bottomBtn("🗑", "Supprimer", v -> askDelete());
+                          if (selected.size() == 1) bottomBtn("✏", "Renommer", v -> rename(selected.iterator().next()));
+                          bottomBtn("⋯", "Plus", this::moreMenu);
+                      }
+                      bottomBar.setVisibility(View.VISIBLE);
+                  } else if (!clipboard.isEmpty() && mode == M_BROWSE) {
+                      TextView info = text(clipboard.size() + " élément(s) à " + (clipCut ? "déplacer" : "copier"), 13, cSub, false);
+                      info.setPadding(dp(14), 0, dp(4), 0);
+                      bottomBar.addView(info, new LinearLayout.LayoutParams(0, -2, 2));
+                      bottomBtn("📥", "Coller ici", v -> paste());
+                      bottomBtn("✕", "Annuler", v -> {
+                          clipboard.clear();
+                          updateBottom();
+                      });
+                      bottomBar.setVisibility(View.VISIBLE);
+                  } else {
+                      bottomBar.setVisibility(View.GONE);
+                  }
+              }
+
+              // ---------------------------------------------------------------- accueil
+
+              void showHome() {
+                  mode = M_HOME;
+                  scanGen++;
+                  selected.clear();
+                  prevDir = null;
+                  crumbScroll.setVisibility(View.GONE);
+                  btnBack.setVisibility(View.GONE);
+                  updateHeader();
+                  btnBack.setVisibility(View.GONE);
+
+                  ScrollView sv = new ScrollView(this);
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setPadding(dp(14), dp(14), dp(14), dp(24));
+                  sv.addView(col);
+
+                  List<File> roots = storageRoots();
+                  for (int i = 0; i < roots.size(); i++) col.addView(storageCard(roots.get(i), i == 0 ? "Stockage interne" : "Carte SD / USB"));
+
+                  col.addView(section("Catégories"));
+                  Object[][] tiles = {
+                          {"🖼", "Images", 0xFF43A047, IMG}, {"🎬", "Vidéos", 0xFFE53935, VID}, {"🎵", "Audio", 0xFF8E24AA, AUD},
+                          {"📄", "Documents", 0xFF1E88E5, DOC}, {"🤖", "APK", 0xFF7CB342, APK}, {"🗜", "Archives", 0xFF6D4C41, ARC},
+                          {"⬇", "Téléchargements", 0xFF00897B, "dl"}, {"📊", "Gros fichiers", 0xFFF4511E, "big"}, {"🗑", "Corbeille", 0xFF546E7A, "trash"}};
+                  LinearLayout row = null;
+                  for (int i = 0; i < tiles.length; i++) {
+                      if (i % 3 == 0) {
+                          row = new LinearLayout(this);
+                          row.setOrientation(LinearLayout.HORIZONTAL);
+                          col.addView(row);
+                      }
+                      final Object[] t = tiles[i];
+                      LinearLayout tile = new LinearLayout(this);
+                      tile.setOrientation(LinearLayout.VERTICAL);
+                      tile.setGravity(Gravity.CENTER);
+                      tile.setPadding(dp(4), dp(14), dp(4), dp(12));
+                      tile.setBackground(round(cCard, 16));
+                      tile.setForeground(ripple(false));
+                      tile.setElevation(dp(1));
+                      TextView ic = text((String) t[0], 24, cText, false);
+                      ic.setGravity(Gravity.CENTER);
+                      ic.setBackground(roundOval(soft((Integer) t[2])));
+                      tile.addView(ic, new LinearLayout.LayoutParams(dp(50), dp(50)));
+                      TextView lb = text((String) t[1], 12, cText, true);
+                      lb.setGravity(Gravity.CENTER);
+                      lb.setPadding(0, dp(8), 0, 0);
+                      lb.setSingleLine(true);
+                      lb.setEllipsize(TextUtils.TruncateAt.END);
+                      tile.addView(lb);
+                      tile.setOnClickListener(v -> openTile(t));
+                      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+                      lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+                      row.addView(tile, lp);
+                  }
+
+                  Set<String> favs = favorites();
+                  if (!favs.isEmpty()) {
+                      col.addView(section("Favoris"));
+                      LinearLayout box = cardBox();
+                      for (final String p : favs) {
+                          final File f = new File(p);
+                          View r = homeRow("⭐", f.getName().isEmpty() ? p : f.getName(), p, v -> {
+                              if (f.isDirectory()) browse(f, null);
+                              else if (f.exists()) openFile(f);
+                              else toast("Introuvable");
+                          });
+                          r.setOnLongClickListener(v -> {
+                              new AlertDialog.Builder(this).setTitle("Retirer des favoris ?").setMessage(p)
+                                      .setPositiveButton("Retirer", (d, w) -> {
+                                          setFav(f, false);
+                                          showHome();
+                                      }).setNegativeButton("Annuler", null).show();
+                              return true;
+                          });
+                          box.addView(r);
+                      }
+                      col.addView(box);
+                  }
+
+                  List<String> rec = recents();
+                  if (!rec.isEmpty()) {
+                      col.addView(section("Récents"));
+                      LinearLayout box = cardBox();
+                      int n = 0;
+                      for (String p : rec) {
+                          final File f = new File(p);
+                          if (!f.exists()) continue;
+                          box.addView(homeRow(emoji(f), f.getName(), fmtSize(f.length()) + "  •  " + f.getParent(), v -> openFile(f)));
+                          if (++n >= 8) break;
+                      }
+                      if (n > 0) col.addView(box);
+                  }
+
+                  content.removeAllViews();
+                  content.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+              }
+
+              GradientDrawable roundOval(int color) {
+                  GradientDrawable g = new GradientDrawable();
+                  g.setShape(GradientDrawable.OVAL);
+                  g.setColor(color);
+                  return g;
+              }
+
+              TextView section(String s) {
+                  TextView t = text(s, 15, cSub, true);
+                  t.setPadding(dp(6), dp(18), 0, dp(8));
+                  return t;
+              }
+
+              LinearLayout cardBox() {
+                  LinearLayout b = new LinearLayout(this);
+                  b.setOrientation(LinearLayout.VERTICAL);
+                  b.setBackground(round(cCard, 16));
+                  b.setElevation(dp(1));
+                  b.setClipToOutline(true);
+                  return b;
+              }
+
+              View homeRow(String icon, String title, String sub, View.OnClickListener l) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setOrientation(LinearLayout.HORIZONTAL);
+                  r.setGravity(Gravity.CENTER_VERTICAL);
+                  r.setPadding(dp(14), dp(10), dp(14), dp(10));
+                  r.setBackground(ripple(false));
+                  r.setOnClickListener(l);
+                  TextView ic = text(icon, 22, cText, false);
+                  r.addView(ic);
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setPadding(dp(14), 0, 0, 0);
+                  TextView a = text(title, 15, cText, false);
+                  a.setSingleLine(true);
+                  a.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                  TextView b = text(sub, 12, cSub, false);
+                  b.setSingleLine(true);
+                  b.setEllipsize(TextUtils.TruncateAt.START);
+                  c.addView(a);
+                  c.addView(b);
+                  r.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                  return r;
+              }
+
+              View storageCard(final File r, String label) {
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setPadding(dp(18), dp(16), dp(18), dp(16));
+                  c.setBackground(round(cCard, 18));
+                  c.setForeground(ripple(false));
+                  c.setElevation(dp(1));
+                  c.setOnClickListener(v -> browse(r, null));
+                  long total = 0, free = 0;
+                  try {
+                      StatFs s = new StatFs(r.getPath());
+                      total = s.getTotalBytes();
+                      free = s.getAvailableBytes();
+                  } catch (Exception ignored) {
+                  }
+                  long used = total - free;
+                  LinearLayout head = new LinearLayout(this);
+                  head.setGravity(Gravity.CENTER_VERTICAL);
+                  head.addView(text("💾  " + label, 16, cText, true), new LinearLayout.LayoutParams(0, -2, 1));
+                  int pct = total > 0 ? (int) (used * 100 / total) : 0;
+                  head.addView(text(pct + " %", 16, cPrimary, true));
+                  c.addView(head);
+                  ProgressBar pb = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                  pb.setMax(1000);
+                  pb.setProgress(total > 0 ? (int) (used * 1000 / total) : 0);
+                  pb.setProgressTintList(ColorStateList.valueOf(pct > 90 ? 0xFFE53935 : cPrimary));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(10));
+                  lp.setMargins(0, dp(10), 0, dp(8));
+                  c.addView(pb, lp);
+                  c.addView(text(fmtSize(used) + " utilisés sur " + fmtSize(total) + "   •   " + fmtSize(free) + " libres", 13, cSub, false));
+                  LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2);
+                  cl.setMargins(0, 0, 0, dp(10));
+                  c.setLayoutParams(cl);
+                  return c;
+              }
+
+              @SuppressWarnings("unchecked")
+              void openTile(Object[] t) {
+                  Object k = t[3];
+                  String title = (String) t[1];
+                  prevDir = null;
+                  if (k instanceof Set) {
+                      final Set<String> exts = (Set<String>) k;
+                      runScan(title, storageRoots(), f -> f.isFile() && exts.contains(ext(f)), 2, false, 0);
+                  } else if ("dl".equals(k)) {
+                      File d = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                      if (!d.exists()) d.mkdirs();
+                      browse(d, null);
+                  } else if ("big".equals(k)) {
+                      runScan("Gros fichiers (> 10 Mo)", storageRoots(), f -> f.isFile() && f.length() > 10L * 1024 * 1024, 1, false, 300);
+                  } else {
+                      showTrash();
+                  }
+              }
+
+              // ---------------------------------------------------------------- navigation
+
+              void browse(File dir, File focus) {
+                  mode = M_BROWSE;
+                  currentDir = dir;
+                  selected.clear();
+                  subText = dir.getAbsolutePath();
+                  showListUi("", true, true);
+                  buildCrumbs();
+                  loadDir(dir, -1, focus);
+              }
+
+              void buildCrumbs() {
+                  crumbs.removeAllViews();
+                  File r = rootOf(currentDir);
+                  ArrayList<File> chain = new ArrayList<>();
+                  for (File f = currentDir; f != null; f = f.getParentFile()) {
+                      chain.add(0, f);
+                      if (f.equals(r)) break;
+                  }
+                  for (int i = 0; i < chain.size(); i++) {
+                      final File f = chain.get(i);
+                      boolean last = i == chain.size() - 1;
+                      String name;
+                      if (i == 0) name = f.equals(internalRoot()) ? "📱 Interne" : (f.getName().isEmpty() ? "/" : "💽 " + f.getName());
+                      else name = f.getName();
+                      TextView t = text(name, 13, last ? cPrimary : cSub, last);
+                      t.setPadding(dp(8), dp(6), dp(8), dp(6));
+                      t.setBackground(ripple(false));
+                      t.setOnClickListener(v -> {
+                          if (!f.equals(currentDir)) browse(f, null);
+                      });
+                      crumbs.addView(t);
+                      if (!last) crumbs.addView(text("›", 15, cSub, false));
+                  }
+                  crumbScroll.post(() -> crumbScroll.fullScroll(View.FOCUS_RIGHT));
+              }
+
+              void loadDir(final File dir, final int keepPos, final File focus) {
+                  if (dir == null) return;
+                  final int gen = ++scanGen;
+                  final boolean hidden = showHidden();
+                  final int key = prefs.getInt("sort", 0);
+                  final boolean asc = prefs.getBoolean("asc", true);
+                  if (keepPos < 0) loading.setVisibility(View.VISIBLE);
+                  bg.execute(() -> {
+                      File[] fs = dir.listFiles();
+                      final ArrayList<File> res = new ArrayList<>();
+                      final HashMap<String, Integer> cnt = new HashMap<>();
+                      if (fs != null) {
+                          for (File f : fs) {
+                              if (!hidden && f.getName().startsWith(".")) continue;
+                              res.add(f);
+                              if (f.isDirectory()) {
+                                  String[] c = f.list();
+                                  cnt.put(f.getAbsolutePath(), c == null ? -1 : c.length);
+                              }
+                          }
+                      }
+                      sortFiles(res, key, asc);
+                      final boolean denied = fs == null;
+                      ui.post(() -> {
+                          if (gen != scanGen || mode != M_BROWSE) return;
+                          items.clear();
+                          items.addAll(res);
+                          childCount.clear();
+                          childCount.putAll(cnt);
+                          loading.setVisibility(View.GONE);
+                          adapter.notifyDataSetChanged();
+                          if (keepPos >= 0) listView.setSelection(Math.min(keepPos, Math.max(0, items.size() - 1)));
+                          else if (focus != null) listView.setSelection(Math.max(0, items.indexOf(focus) - 2));
+                          else listView.setSelection(0);
+                          subText = res.size() + " élément(s)" + (denied ? " — accès refusé" : "") + "  •  " + dir.getAbsolutePath();
+                          updateHeader();
+                          updateEmpty();
+                      });
+                  });
+              }
+
+              static long sizeOfFile(File f) {
+                  return f.isDirectory() ? 0 : f.length();
+              }
+
+              static void sortFiles(List<File> list, final int key, final boolean asc) {
+                  final HashMap<File, Boolean> isDir = new HashMap<>();
+                  for (File f : list) isDir.put(f, f.isDirectory());
+                  Collections.sort(list, (a, b) -> {
+                      boolean da = isDir.get(a), db = isDir.get(b);
+                      if (da != db) return da ? -1 : 1;
+                      int r;
+                      switch (key) {
+                          case 1:
+                              r = Long.compare(sizeOfFile(a), sizeOfFile(b));
+                              break;
+                          case 2:
+                              r = Long.compare(a.lastModified(), b.lastModified());
+                              break;
+                          case 3:
+                              r = ext(a).compareTo(ext(b));
+                              if (r == 0) r = a.getName().compareToIgnoreCase(b.getName());
+                              break;
+                          default:
+                              r = a.getName().compareToIgnoreCase(b.getName());
+                      }
+                      return asc ? r : -r;
+                  });
+              }
+
+              interface FileTest {
+                  boolean ok(File f);
+              }
+
+              void runScan(String title, final List<File> bases, final FileTest test, final int sortKey, final boolean asc, final int limit) {
+                  mode = M_LIST;
+                  selected.clear();
+                  subText = "Analyse en cours…";
+                  showListUi(title, false, false);
+                  final int gen = ++scanGen;
+                  final boolean hidden = showHidden();
+                  final File trash = trashDir();
+                  bg.execute(() -> {
+                      ArrayList<File> res = new ArrayList<>();
+                      ArrayDeque<File> st = new ArrayDeque<>();
+                      for (File b : bases) st.push(b);
+                      int seen = 0;
+                      while (!st.isEmpty()) {
+                          if (gen != scanGen) return;
+                          File d = st.pop();
+                          File[] fs = d.listFiles();
+                          if (fs == null) continue;
+                          for (File f : fs) {
+                              String nm = f.getName();
+                              if (!hidden && nm.startsWith(".")) continue;
+                              if (f.isDirectory()) {
+                                  if (f.equals(trash)) continue;
+                                  st.push(f);
+                              }
+                              if (test.ok(f)) {
+                                  res.add(f);
+                                  if (res.size() >= 20000) {
+                                      st.clear();
+                                      break;
+                                  }
+                              }
+                          }
+                          if (++seen % 200 == 0) {
+                              final int n = res.size();
+                              ui.post(() -> {
+                                  if (gen == scanGen && mode == M_LIST) {
+                                      subText = "Analyse… " + n + " trouvé(s)";
+                                      updateHeader();
+                                  }
+                              });
+                          }
+                      }
+                      sortFiles(res, sortKey, asc);
+                      final List<File> out = (limit > 0 && res.size() > limit) ? new ArrayList<>(res.subList(0, limit)) : res;
+                      if (sortKey == 1 && !asc) Collections.sort(out, (a, b) -> Long.compare(b.length(), a.length()));
+                      long tot = 0;
+                      for (File f : out) tot += sizeOfFile(f);
+                      final long ftot = tot;
+                      ui.post(() -> {
+                          if (gen != scanGen) return;
+                          items.clear();
+                          items.addAll(out);
+                          loading.setVisibility(View.GONE);
+                          adapter.notifyDataSetChanged();
+                          subText = out.size() + " élément(s)  •  " + fmtSize(ftot);
+                          updateHeader();
+                          updateEmpty();
+                      });
+                  });
+              }
+
+              void askSearch() {
+                  final File base = mode == M_BROWSE ? currentDir : null;
+                  inputDialog(base != null ? "Rechercher dans « " + displayName(base) + " »" : "Rechercher partout", "", false, q -> {
+                      final String ql = q.toLowerCase(Locale.ROOT);
+                      prevDir = base;
+                      List<File> bases = base != null ? Collections.singletonList(base) : storageRoots();
+                      runScan("« " + q + " »", bases, f -> f.getName().toLowerCase(Locale.ROOT).contains(ql), 0, true, 5000);
+                  });
+              }
+
+              void showTrash() {
+                  mode = M_TRASH;
+                  selected.clear();
+                  subText = "Appuyez sur un élément pour le restaurer";
+                  showListUi("Corbeille", false, false);
+                  final int gen = ++scanGen;
+                  bg.execute(() -> {
+                      File[] fs = trashDir().listFiles();
+                      final ArrayList<File> res = new ArrayList<>();
+                      if (fs != null) res.addAll(Arrays.asList(fs));
+                      Collections.sort(res, (a, b) -> b.getName().compareTo(a.getName()));
+                      long tot = 0;
+                      for (File f : res) tot += sizeRec(f);
+                      final long ftot = tot;
+                      ui.post(() -> {
+                          if (gen != scanGen) return;
+                          items.clear();
+                          items.addAll(res);
+                          loading.setVisibility(View.GONE);
+                          adapter.notifyDataSetChanged();
+                          subText = res.size() + " élément(s)  •  " + fmtSize(ftot);
+                          updateHeader();
+                          updateEmpty();
+                      });
+                  });
+              }
+
+              void refresh() {
+                  switch (mode) {
+                      case M_BROWSE:
+                          loadDir(currentDir, listView.getFirstVisiblePosition(), null);
+                          break;
+                      case M_TRASH:
+                          showTrash();
+                          break;
+                      case M_LIST:
+                          Iterator<File> it = items.iterator();
+                          while (it.hasNext()) if (!it.next().exists()) it.remove();
+                          adapter.notifyDataSetChanged();
+                          updateHeader();
+                          updateEmpty();
+                          break;
+                      case M_HOME:
+                          showHome();
+                          break;
+                  }
+              }
+
+              // ---------------------------------------------------------------- clic & sélection
+
+              void onItemClick(File f) {
+                  if (!selected.isEmpty()) {
+                      toggleSelect(f);
+                      return;
+                  }
+                  if (mode == M_TRASH) {
+                      trashItemDialog(f);
+                      return;
+                  }
+                  if (f.isDirectory()) {
+                      browse(f, null);
+                      return;
+                  }
+                  openFile(f);
+              }
+
+              void toggleSelect(File f) {
+                  if (!selected.remove(f)) selected.add(f);
+                  refreshSelectionUi();
+              }
+
+              void selectAll() {
+                  if (selected.size() == items.size()) selected.clear();
+                  else selected.addAll(items);
+                  refreshSelectionUi();
+              }
+
+              void refreshSelectionUi() {
+                  adapter.notifyDataSetChanged();
+                  updateHeader();
+                  if (selected.isEmpty() && mode == M_HOME) btnBack.setVisibility(View.GONE);
+              }
+
+              void openFile(File f) {
+                  if (!f.exists()) {
+                      toast("Fichier introuvable");
+                      return;
+                  }
+                  addRecent(f);
+                  String e = ext(f);
+                  if (e.equals("zip")) {
+                      zipDialog(f);
+                  } else if (TXT.contains(e) && f.length() < 3L * 1024 * 1024) {
+                      Intent i = new Intent(this, EditorActivity.class);
+                      i.putExtra("path", f.getAbsolutePath());
+                      startActivity(i);
+                  } else {
+                      openWith(f, false);
+                  }
+              }
+
+              void openWith(File f, boolean chooser) {
+                  Uri u = FilesProvider.uriFor(f);
+                  String mime = mimeOf(f);
+                  Intent i = new Intent(Intent.ACTION_VIEW);
+                  i.setDataAndType(u, mime);
+                  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                  try {
+                      startActivity(chooser ? Intent.createChooser(i, "Ouvrir avec") : i);
+                  } catch (ActivityNotFoundException ex) {
+                      if (!mime.equals("*/*")) {
+                          Intent j = new Intent(Intent.ACTION_VIEW);
+                          j.setDataAndType(u, "*/*");
+                          j.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                          try {
+                              startActivity(Intent.createChooser(j, "Ouvrir avec"));
+                              return;
+                          } catch (Exception ignored) {
+                          }
+                      }
+                      toast("Aucune application pour ouvrir ce fichier");
+                  } catch (Exception ex) {
+                      toast("Impossible d'ouvrir : " + ex.getMessage());
+                  }
+              }
+
+              // ---------------------------------------------------------------- menus
+
+              void mainMenu(View anchor) {
+                  PopupMenu pm = new PopupMenu(this, anchor);
+                  Menu m = pm.getMenu();
+                  if (mode == M_BROWSE) {
+                      m.add(0, 1, 0, "📁  Nouveau dossier");
+                      m.add(0, 2, 1, "📝  Nouveau fichier texte");
+                      m.add(0, 3, 2, "↕  Trier par…");
+                      boolean fav = favorites().contains(currentDir.getAbsolutePath());
+                      m.add(0, 4, 3, fav ? "⭐  Retirer des favoris" : "⭐  Ajouter aux favoris");
+                      m.add(0, 5, 4, "☑  Tout sélectionner");
+                      m.add(0, 6, 5, "🔄  Actualiser");
+                      m.add(0, 7, 6, "ℹ  Propriétés du dossier");
+                      m.add(0, 8, 7, "🏠  Accueil");
+                  }
+                  if (mode == M_LIST) {
+                      m.add(0, 5, 0, "☑  Tout sélectionner");
+                      m.add(0, 8, 1, "🏠  Accueil");
+                  }
+                  if (mode == M_TRASH) {
+                      m.add(0, 20, 0, "♻  Tout restaurer");
+                      m.add(0, 21, 1, "🗑  Vider la corbeille");
+                  }
+                  if (mode == M_HOME) {
+                      m.add(0, 30, 0, "🗂  Explorer la racine ( / )");
+                      m.add(0, 31, 1, "ℹ  À propos");
+                  }
+                  m.add(1, 10, 20, "Afficher les fichiers cachés").setCheckable(true).setChecked(showHidden());
+                  m.add(1, 11, 21, "Thème sombre").setCheckable(true).setChecked(dark);
+                  pm.setOnMenuItemClickListener(it -> {
+                      switch (it.getItemId()) {
+                          case 1:
+                              inputDialog("Nouveau dossier", "Nouveau dossier", true, n -> {
+                                  File d = new File(currentDir, n);
+                                  if (d.exists()) toast("Existe déjà");
+                                  else if (d.mkdirs()) refresh();
+                                  else toast("Impossible de créer le dossier");
+                              });
+                              break;
+                          case 2:
+                              inputDialog("Nouveau fichier", "nouveau.txt", true, n -> {
+                                  File d = new File(currentDir, n);
+                                  try {
+                                      if (d.exists()) toast("Existe déjà");
+                                      else if (d.createNewFile()) refresh();
+                                      else toast("Échec");
+                                  } catch (IOException e) {
+                                      toast("Erreur : " + e.getMessage());
+                                  }
+                              });
+                              break;
+                          case 3:
+                              sortDialog();
+                              break;
+                          case 4:
+                              setFav(currentDir, !favorites().contains(currentDir.getAbsolutePath()));
+                              break;
+                          case 5:
+                              selectAll();
+                              break;
+                          case 6:
+                              refresh();
+                              break;
+                          case 7:
+                              properties(new ArrayList<>(Collections.singletonList(currentDir)));
+                              break;
+                          case 8:
+                              showHome();
+                              break;
+                          case 10:
+                              prefs.edit().putBoolean("hidden", !showHidden()).apply();
+                              refresh();
+                              break;
+                          case 11:
+                              prefs.edit().putBoolean("dark", !dark).apply();
+                              recreate();
+                              break;
+                          case 20:
+                              restore(new ArrayList<>(items));
+                              break;
+                          case 21:
+                              deletePermanent(new ArrayList<>(items));
+                              break;
+                          case 30:
+                              browse(new File("/"), null);
+                              break;
+                          case 31:
+                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 1.0")
+                                      .setMessage("Gestionnaire de fichiers complet :\n\n• Explorer, copier, couper, coller\n• Corbeille avec restauration\n"
+                                              + "• Compression et extraction ZIP\n• Recherche dans tout le téléphone\n• Catégories et gros fichiers\n"
+                                              + "• Miniatures photos et vidéos\n• Éditeur de texte intégré\n• Favoris, récents, MD5, thème sombre")
+                                      .setPositiveButton("OK", null).show();
+                              break;
+                      }
+                      return true;
+                  });
+                  pm.show();
+              }
+
+              void newMenu(View anchor) {
+                  PopupMenu pm = new PopupMenu(this, anchor);
+                  pm.getMenu().add(0, 1, 0, "📁  Nouveau dossier");
+                  pm.getMenu().add(0, 2, 1, "📝  Nouveau fichier texte");
+                  pm.setOnMenuItemClickListener(it -> {
+                      if (it.getItemId() == 1) {
+                          inputDialog("Nouveau dossier", "Nouveau dossier", true, n -> {
+                              File d = new File(currentDir, n);
+                              if (d.exists()) toast("Existe déjà");
+                              else if (d.mkdirs()) refresh();
+                              else toast("Impossible de créer le dossier");
+                          });
+                      } else {
+                          inputDialog("Nouveau fichier", "nouveau.txt", true, n -> {
+                              File d = new File(currentDir, n);
+                              try {
+                                  if (d.exists()) toast("Existe déjà");
+                                  else if (d.createNewFile()) {
+                                      refresh();
+                                      openFile(d);
+                                  } else toast("Échec");
+                              } catch (IOException e) {
+                                  toast("Erreur : " + e.getMessage());
+                              }
+                          });
+                      }
+                      return true;
+                  });
+                  pm.show();
+              }
+
+              void moreMenu(View anchor) {
+                  final ArrayList<File> sel = new ArrayList<>(selected);
+                  final File one = sel.size() == 1 ? sel.get(0) : null;
+                  PopupMenu pm = new PopupMenu(this, anchor);
+                  Menu m = pm.getMenu();
+                  m.add(0, 1, 0, "📤  Partager");
+                  if (one != null && one.isFile()) m.add(0, 2, 1, "📂  Ouvrir avec…");
+                  m.add(0, 3, 2, "🗜  Compresser en ZIP");
+                  if (one != null && one.getName().toLowerCase(Locale.ROOT).endsWith(".zip")) m.add(0, 4, 3, "📦  Extraire");
+                  if (one != null) {
+                      boolean fav = favorites().contains(one.getAbsolutePath());
+                      m.add(0, 5, 4, fav ? "⭐  Retirer des favoris" : "⭐  Ajouter aux favoris");
+                      m.add(0, 6, 5, "🔗  Copier le chemin");
+                  }
+                  if (mode == M_LIST && one != null) m.add(0, 8, 6, "📁  Afficher dans le dossier");
+                  m.add(0, 7, 7, "ℹ  Propriétés");
+                  pm.setOnMenuItemClickListener(it -> {
+                      switch (it.getItemId()) {
+                          case 1:
+                              share(sel);
+                              break;
+                          case 2:
+                              openWith(one, true);
+                              break;
+                          case 3:
+                              askZip(sel);
+                              break;
+                          case 4:
+                              zipDialog(one);
+                              break;
+                          case 5:
+                              setFav(one, !favorites().contains(one.getAbsolutePath()));
+                              selected.clear();
+                              refreshSelectionUi();
+                              break;
+                          case 6:
+                              ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                              cm.setPrimaryClip(ClipData.newPlainText("chemin", one.getAbsolutePath()));
+                              toast("Chemin copié");
+                              break;
+                          case 7:
+                              properties(sel);
+                              break;
+                          case 8:
+                              File parent = one.getParentFile();
+                              if (parent != null) browse(parent, one);
+                              break;
+                      }
+                      return true;
+                  });
+                  pm.show();
+              }
+
+              void sortDialog() {
+                  String[] opts = {"Nom", "Taille", "Date de modification", "Type"};
+                  new AlertDialog.Builder(this).setTitle("Trier par")
+                          .setSingleChoiceItems(opts, prefs.getInt("sort", 0), (d, w) -> prefs.edit().putInt("sort", w).apply())
+                          .setPositiveButton("Croissant ↑", (d, w) -> {
+                              prefs.edit().putBoolean("asc", true).apply();
+                              refresh();
+                          })
+                          .setNegativeButton("Décroissant ↓", (d, w) -> {
+                              prefs.edit().putBoolean("asc", false).apply();
+                              refresh();
+                          }).show();
+              }
+
+              interface TextCb {
+                  void got(String s);
+              }
+
+              void inputDialog(String title, String initial, boolean selectName, final TextCb cb) {
+                  final EditText et = new EditText(this);
+                  et.setSingleLine(true);
+                  et.setText(initial);
+                  et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                  int dot = initial.lastIndexOf('.');
+                  if (selectName && dot > 0) et.setSelection(0, dot);
+                  else et.setSelection(initial.length());
+                  FrameLayout box = new FrameLayout(this);
+                  box.setPadding(dp(22), dp(10), dp(22), 0);
+                  box.addView(et);
+                  AlertDialog d = new AlertDialog.Builder(this).setTitle(title).setView(box)
+                          .setPositiveButton("OK", (di, w) -> {
+                              String s = et.getText().toString().trim();
+                              if (s.isEmpty() || s.contains("/")) toast("Nom invalide");
+                              else cb.got(s);
+                          })
+                          .setNegativeButton("Annuler", null).create();
+                  if (d.getWindow() != null) d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                  d.show();
+                  et.requestFocus();
+              }
+
+              // ---------------------------------------------------------------- opérations
+
+              static class Op {
+                  volatile boolean cancel;
+                  volatile long total, done;
+                  volatile String current = "";
+                  int errors;
+                  String msg;
+              }
+
+              interface Job {
+                  void run(Op op) throws Exception;
+              }
+
+              interface Done {
+                  void done(Op op);
+              }
+
+              void runOp(String title, final Job job, final Done after) {
+                  final Op op = new Op();
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(dp(24), dp(12), dp(24), dp(4));
+                  final TextView tv = text("Préparation…", 13, cSub, false);
+                  tv.setMaxLines(3);
+                  final ProgressBar pb = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                  pb.setMax(1000);
+                  pb.setIndeterminate(true);
+                  box.addView(pb, new LinearLayout.LayoutParams(-1, -2));
+                  box.addView(tv);
+                  final AlertDialog d = new AlertDialog.Builder(this).setTitle(title).setView(box).setCancelable(false)
+                          .setNegativeButton("Annuler", (di, w) -> op.cancel = true).create();
+                  d.show();
+                  final Runnable tick = new Runnable() {
+                      @Override
+                      public void run() {
+                          if (op.total > 0) {
+                              pb.setIndeterminate(false);
+                              pb.setProgress((int) Math.min(1000, op.done * 1000 / op.total));
+                              tv.setText(op.current + "\n" + fmtSize(op.done) + " / " + fmtSize(op.total));
+                          } else {
+                              tv.setText(op.current);
+                          }
+                          ui.postDelayed(this, 200);
+                      }
+                  };
+                  ui.post(tick);
+                  bg.execute(() -> {
+                      String err = null;
+                      try {
+                          job.run(op);
+                      } catch (Throwable t) {
+                          err = t.getMessage() != null ? t.getMessage() : t.toString();
+                      }
+                      final String fe = err;
+                      ui.post(() -> {
+                          ui.removeCallbacks(tick);
+                          try {
+                              d.dismiss();
+                          } catch (Exception ignored) {
+                          }
+                          if (isFinishing()) return;
+                          if (fe != null) toast("Erreur : " + fe);
+                          else if (op.cancel) toast("Opération annulée");
+                          else if (op.errors > 0) toast(op.errors + " erreur(s) pendant l'opération");
+                          else if (op.msg != null) toast(op.msg);
+                          if (after != null) after.done(op);
+                          selected.clear();
+                          refresh();
+                          updateHeader();
+                      });
+                  });
+              }
+
+              static long sizeRec(File f) {
+                  if (!f.isDirectory()) return f.length();
+                  long t = 0;
+                  ArrayDeque<File> st = new ArrayDeque<>();
+                  st.push(f);
+                  while (!st.isEmpty()) {
+                      File[] fs = st.pop().listFiles();
+                      if (fs == null) continue;
+                      for (File c : fs) {
+                          if (c.isDirectory()) st.push(c);
+                          else t += c.length();
+                      }
+                  }
+                  return t;
+              }
+
+              static boolean deleteRec(File f) {
+                  if (f.isDirectory()) {
+                      File[] fs = f.listFiles();
+                      if (fs != null) for (File c : fs) deleteRec(c);
+                  }
+                  return f.delete() || !f.exists();
+              }
+
+              static File uniqueDest(File dir, String name) {
+                  File d = new File(dir, name);
+                  if (!d.exists()) return d;
+                  String base = name, ex = "";
+                  int dot = name.lastIndexOf('.');
+                  if (dot > 0) {
+                      base = name.substring(0, dot);
+                      ex = name.substring(dot);
+                  }
+                  for (int i = 1; ; i++) {
+                      d = new File(dir, base + " (" + i + ")" + ex);
+                      if (!d.exists()) return d;
+                  }
+              }
+
+              void copyRec(File s, File d, Op op) {
+                  if (op.cancel) return;
+                  if (s.isDirectory()) {
+                      if (!d.exists() && !d.mkdirs()) {
+                          op.errors++;
+                          return;
+                      }
+                      File[] fs = s.listFiles();
+                      if (fs != null) for (File c : fs) copyRec(c, new File(d, c.getName()), op);
+                  } else {
+                      op.current = s.getName();
+                      try (InputStream in = new FileInputStream(s); OutputStream out = new FileOutputStream(d)) {
+                          byte[] buf = new byte[128 * 1024];
+                          int n;
+                          while ((n = in.read(buf)) > 0) {
+                              if (op.cancel) break;
+                              out.write(buf, 0, n);
+                              op.done += n;
+                          }
+                      } catch (IOException e) {
+                          op.errors++;
+                      }
+                      if (op.cancel) d.delete();
+                      else d.setLastModified(s.lastModified());
+                  }
+              }
+
+              void setClip(boolean cut) {
+                  clipboard.clear();
+                  clipboard.addAll(selected);
+                  clipCut = cut;
+                  selected.clear();
+                  refreshSelectionUi();
+                  toast(clipboard.size() + " élément(s) " + (cut ? "coupé(s)" : "copié(s)") + " — ouvrez le dossier de destination puis « Coller ici »");
+              }
+
+              void paste() {
+                  final ArrayList<File> src = new ArrayList<>(clipboard);
+                  final boolean cut = clipCut;
+                  final File dest = currentDir;
+                  String destPath = dest.getAbsolutePath() + "/";
+                  for (File s : src) {
+                      if (s.isDirectory() && destPath.startsWith(s.getAbsolutePath() + "/")) {
+                          toast("Impossible de coller un dossier dans lui-même");
+                          return;
+                      }
+                  }
+                  if (cut) clipboard.clear();
+                  runOp(cut ? "Déplacement…" : "Copie…", op -> {
+                      long total = 0;
+                      for (File s : src) total += sizeRec(s);
+                      op.total = total;
+                      for (File s : src) {
+                          if (op.cancel) break;
+                          if (!s.exists()) {
+                              op.errors++;
+                              continue;
+                          }
+                          if (cut && dest.equals(s.getParentFile())) continue;
+                          File d = uniqueDest(dest, s.getName());
+                          op.current = s.getName();
+                          if (cut) {
+                              long sz = sizeRec(s);
+                              if (s.renameTo(d)) {
+                                  op.done += sz;
+                              } else {
+                                  int before = op.errors;
+                                  copyRec(s, d, op);
+                                  if (!op.cancel && op.errors == before) deleteRec(s);
+                              }
+                          } else {
+                              copyRec(s, d, op);
+                          }
+                      }
+                      op.msg = src.size() + " élément(s) " + (cut ? "déplacé(s)" : "copié(s)");
+                  }, null);
+              }
+
+              void askDelete() {
+                  final ArrayList<File> fs = new ArrayList<>(selected);
+                  new AlertDialog.Builder(this).setTitle("Supprimer " + fs.size() + " élément(s) ?")
+                          .setMessage("« Corbeille » permet de les récupérer plus tard.\n« Définitivement » est irréversible.")
+                          .setPositiveButton("Corbeille", (d, w) -> moveToTrash(fs))
+                          .setNeutralButton("Définitivement", (d, w) -> new AlertDialog.Builder(this)
+                                  .setTitle("Suppression définitive")
+                                  .setMessage("Supprimer définitivement " + fs.size() + " élément(s) ? Cette action est irréversible.")
+                                  .setPositiveButton("Supprimer", (d2, w2) -> runOp("Suppression…", op -> {
+                                      for (File f : fs) {
+                                          if (op.cancel) break;
+                                          op.current = f.getName();
+                                          if (!deleteRec(f)) op.errors++;
+                                      }
+                                      op.msg = fs.size() + " élément(s) supprimé(s)";
+                                  }, null))
+                                  .setNegativeButton("Annuler", null).show())
+                          .setNegativeButton("Annuler", null).show();
+              }
+
+              void moveToTrash(final ArrayList<File> fs) {
+                  runOp("Mise à la corbeille…", op -> {
+                      File t = trashDir();
+                      if (!t.exists()) t.mkdirs();
+                      long now = System.currentTimeMillis();
+                      int i = 0, perm = 0;
+                      SharedPreferences.Editor ed = prefs.edit();
+                      for (File f : fs) {
+                          if (op.cancel) break;
+                          op.current = f.getName();
+                          String tn = now + "_" + (i++) + "_" + f.getName();
+                          File d = new File(t, tn);
+                          if (f.renameTo(d)) {
+                              ed.putString("tr:" + tn, f.getAbsolutePath());
+                          } else if (deleteRec(f)) {
+                              perm++;
+                          } else {
+                              op.errors++;
+                          }
+                      }
+                      ed.apply();
+                      op.msg = perm > 0 ? perm + " élément(s) supprimé(s) définitivement (autre stockage)"
+                              : fs.size() + " élément(s) mis à la corbeille";
+                  }, null);
+              }
+
+              void trashItemDialog(final File f) {
+                  String orig = prefs.getString("tr:" + f.getName(), "inconnu");
+                  new AlertDialog.Builder(this).setTitle(displayName(f))
+                          .setMessage("Emplacement d'origine :\n" + orig + "\n\nTaille : " + fmtSize(sizeRec(f)))
+                          .setPositiveButton("Restaurer", (d, w) -> restore(new ArrayList<>(Collections.singletonList(f))))
+                          .setNeutralButton("Supprimer", (d, w) -> deletePermanent(new ArrayList<>(Collections.singletonList(f))))
+                          .setNegativeButton("Fermer", null).show();
+              }
+
+              void restore(final ArrayList<File> fs) {
+                  if (fs.isEmpty()) return;
+                  runOp("Restauration…", op -> {
+                      SharedPreferences.Editor ed = prefs.edit();
+                      for (File f : fs) {
+                          if (op.cancel) break;
+                          String key = "tr:" + f.getName();
+                          String orig = prefs.getString(key, null);
+                          File target = orig != null ? new File(orig)
+                                  : new File(new File(internalRoot(), "Restaurés"), f.getName().replaceFirst("^\\d+_\\d+_", ""));
+                          File parent = target.getParentFile();
+                          if (parent != null && !parent.exists()) parent.mkdirs();
+                          if (target.exists()) target = uniqueDest(parent, target.getName());
+                          op.current = target.getName();
+                          if (f.renameTo(target)) ed.remove(key);
+                          else op.errors++;
+                      }
+                      ed.apply();
+                      op.msg = fs.size() + " élément(s) restauré(s)";
+                  }, null);
+              }
+
+              void deletePermanent(final ArrayList<File> fs) {
+                  if (fs.isEmpty()) return;
+                  new AlertDialog.Builder(this).setTitle("Suppression définitive")
+                          .setMessage("Supprimer définitivement " + fs.size() + " élément(s) ? Cette action est irréversible.")
+                          .setPositiveButton("Supprimer", (d, w) -> runOp("Suppression…", op -> {
+                              SharedPreferences.Editor ed = prefs.edit();
+                              for (File f : fs) {
+                                  if (op.cancel) break;
+                                  op.current = f.getName();
+                                  if (deleteRec(f)) ed.remove("tr:" + f.getName());
+                                  else op.errors++;
+                              }
+                              ed.apply();
+                              op.msg = fs.size() + " élément(s) supprimé(s)";
+                          }, null))
+                          .setNegativeButton("Annuler", null).show();
+              }
+
+              void rename(final File f) {
+                  inputDialog("Renommer", f.getName(), f.isFile(), n -> {
+                      File d = new File(f.getParentFile(), n);
+                      if (d.exists()) {
+                          toast("Un élément porte déjà ce nom");
+                          return;
+                      }
+                      if (f.renameTo(d)) {
+                          Set<String> fav = favorites();
+                          if (fav.remove(f.getAbsolutePath())) {
+                              fav.add(d.getAbsolutePath());
+                              prefs.edit().putStringSet("fav", fav).apply();
+                          }
+                          selected.clear();
+                          refresh();
+                          updateHeader();
+                          if (mode == M_LIST) {
+                              int i = items.indexOf(f);
+                              if (i >= 0) items.set(i, d);
+                              adapter.notifyDataSetChanged();
+                          }
+                      } else toast("Impossible de renommer");
+                  });
+              }
+
+              void share(ArrayList<File> fs) {
+                  ArrayList<Uri> us = new ArrayList<>();
+                  File first = null;
+                  for (File f : fs) {
+                      if (f.isFile()) {
+                          us.add(FilesProvider.uriFor(f));
+                          if (first == null) first = f;
+                      }
+                  }
+                  if (us.isEmpty()) {
+                      toast("Les dossiers ne peuvent pas être partagés — compressez-les en ZIP");
+                      return;
+                  }
+                  Intent i;
+                  if (us.size() == 1) {
+                      i = new Intent(Intent.ACTION_SEND);
+                      i.setType(mimeOf(first));
+                      i.putExtra(Intent.EXTRA_STREAM, us.get(0));
+                  } else {
+                      i = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                      i.setType("*/*");
+                      i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, us);
+                  }
+                  ClipData cd = ClipData.newRawUri("", us.get(0));
+                  for (int k = 1; k < us.size(); k++) cd.addItem(new ClipData.Item(us.get(k)));
+                  i.setClipData(cd);
+                  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                  try {
+                      startActivity(Intent.createChooser(i, "Partager"));
+                  } catch (Exception e) {
+                      toast("Partage impossible");
+                  }
+              }
+
+              // ---------------------------------------------------------------- ZIP
+
+              void askZip(final ArrayList<File> fs) {
+                  if (fs.isEmpty()) return;
+                  final File dir = mode == M_BROWSE ? currentDir : fs.get(0).getParentFile();
+                  String def = (fs.size() == 1 ? fs.get(0).getName().replaceFirst("\\.[^.]+$", "") : "archive") + ".zip";
+                  inputDialog("Nom de l'archive ZIP", def, true, n -> {
+                      final String name = n.toLowerCase(Locale.ROOT).endsWith(".zip") ? n : n + ".zip";
+                      runOp("Compression…", op -> {
+                          long tot = 0;
+                          for (File f : fs) tot += sizeRec(f);
+                          op.total = tot;
+                          File z = uniqueDest(dir, name);
+                          try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(z))) {
+                              for (File f : fs) {
+                                  if (op.cancel) break;
+                                  zipAdd(zos, f, f.getName(), op);
+                              }
+                          }
+                          if (op.cancel) z.delete();
+                          op.msg = "Archive créée : " + z.getName();
+                      }, null);
+                  });
+              }
+
+              void zipAdd(ZipOutputStream zos, File f, String path, Op op) throws IOException {
+                  if (op.cancel) return;
+                  if (f.isDirectory()) {
+                      zos.putNextEntry(new ZipEntry(path + "/"));
+                      zos.closeEntry();
+                      File[] fs = f.listFiles();
+                      if (fs != null) for (File c : fs) zipAdd(zos, c, path + "/" + c.getName(), op);
+                  } else {
+                      op.current = f.getName();
+                      ZipEntry e = new ZipEntry(path);
+                      e.setTime(f.lastModified());
+                      zos.putNextEntry(e);
+                      try (InputStream in = new FileInputStream(f)) {
+                          byte[] buf = new byte[128 * 1024];
+                          int n;
+                          while ((n = in.read(buf)) > 0) {
+                              if (op.cancel) break;
+                              zos.write(buf, 0, n);
+                              op.done += n;
+                          }
+                      } catch (IOException ex) {
+                          op.errors++;
+                      }
+                      zos.closeEntry();
+                  }
+              }
+
+              void zipDialog(final File f) {
+                  final String base = f.getName().replaceFirst("(?i)\\.zip$", "");
+                  String[] opts = {"📦  Extraire ici", "📁  Extraire dans « " + base + " »", "👁  Voir le contenu", "📂  Ouvrir avec…"};
+                  new AlertDialog.Builder(this).setTitle(f.getName()).setItems(opts, (d, w) -> {
+                      File parent = f.getParentFile();
+                      if (w == 0) extract(f, parent);
+                      else if (w == 1) extract(f, uniqueDest(parent, base));
+                      else if (w == 2) zipContents(f);
+                      else openWith(f, true);
+                  }).show();
+              }
+
+              void zipContents(final File f) {
+                  bg.execute(() -> {
+                      final StringBuilder sb = new StringBuilder();
+                      int n = 0;
+                      long tot = 0;
+                      try (ZipFile zf = new ZipFile(f)) {
+                          Enumeration<? extends ZipEntry> en = zf.entries();
+                          while (en.hasMoreElements()) {
+                              ZipEntry e = en.nextElement();
+                              n++;
+                              if (e.getSize() > 0) tot += e.getSize();
+                              if (n <= 500) sb.append(e.isDirectory() ? "📁 " : "📄 ").append(e.getName())
+                                      .append(e.isDirectory() ? "" : "  (" + fmtSize(Math.max(0, e.getSize())) + ")").append('\n');
+                          }
+                          if (n > 500) sb.append("… et ").append(n - 500).append(" autres");
+                          sb.insert(0, n + " élément(s) — " + fmtSize(tot) + " décompressés\n\n");
+                      } catch (Exception ex) {
+                          sb.append("Archive illisible : ").append(ex.getMessage());
+                      }
+                      ui.post(() -> {
+                          if (isFinishing()) return;
+                          ScrollView sv = new ScrollView(this);
+                          TextView tv = text(sb.toString(), 13, cText, false);
+                          tv.setPadding(dp(22), dp(10), dp(22), dp(10));
+                          tv.setTextIsSelectable(true);
+                          sv.addView(tv);
+                          new AlertDialog.Builder(this).setTitle(f.getName()).setView(sv)
+                                  .setPositiveButton("Fermer", null).show();
+                      });
+                  });
+              }
+
+              void extract(final File zip, final File dest) {
+                  runOp("Extraction…", op -> {
+                      if (!dest.exists()) dest.mkdirs();
+                      String canon = dest.getCanonicalPath() + File.separator;
+                      try (ZipFile zf = new ZipFile(zip)) {
+                          long tot = 0;
+                          Enumeration<? extends ZipEntry> en = zf.entries();
+                          while (en.hasMoreElements()) {
+                              long s = en.nextElement().getSize();
+                              if (s > 0) tot += s;
+                          }
+                          op.total = tot;
+                          en = zf.entries();
+                          byte[] buf = new byte[128 * 1024];
+                          while (en.hasMoreElements()) {
+                              if (op.cancel) break;
+                              ZipEntry e = en.nextElement();
+                              File out = new File(dest, e.getName());
+                              if (!out.getCanonicalPath().startsWith(canon)) {
+                                  op.errors++;
+                                  continue;
+                              }
+                              if (e.isDirectory()) {
+                                  out.mkdirs();
+                                  continue;
+                              }
+                              File p = out.getParentFile();
+                              if (p != null) p.mkdirs();
+                              op.current = e.getName();
+                              try (InputStream in = zf.getInputStream(e); OutputStream o = new FileOutputStream(out)) {
+                                  int n;
+                                  while ((n = in.read(buf)) > 0) {
+                                      if (op.cancel) break;
+                                      o.write(buf, 0, n);
+                                      op.done += n;
+                                  }
+                              } catch (IOException ex) {
+                                  op.errors++;
+                              }
+                              if (e.getTime() > 0) out.setLastModified(e.getTime());
+                          }
+                      }
+                      op.msg = "Extraction terminée dans « " + dest.getName() + " »";
+                  }, op -> {
+                      if (!op.cancel && mode == M_BROWSE && !dest.equals(currentDir)) browse(dest, null);
+                  });
+              }
+
+              // ---------------------------------------------------------------- propriétés
+
+              void properties(final ArrayList<File> fs) {
+                  if (fs.isEmpty()) return;
+                  final TextView tv = text("", 14, cText, false);
+                  tv.setPadding(dp(22), dp(12), dp(22), dp(8));
+                  tv.setTextIsSelectable(true);
+                  tv.setLineSpacing(0, 1.2f);
+                  final File one = fs.size() == 1 ? fs.get(0) : null;
+                  final StringBuilder head = new StringBuilder();
+                  if (one != null) {
+                      head.append("Nom : ").append(displayName(one)).append('\n');
+                      head.append("Emplacement : ").append(one.getParent()).append('\n');
+                      head.append("Type : ").append(one.isDirectory() ? "Dossier" : ext(one).toUpperCase(Locale.ROOT) + " (" + mimeOf(one) + ")").append('\n');
+                      head.append("Modifié : ").append(fmtDate(one.lastModified())).append('\n');
+                      head.append("Lecture : ").append(one.canRead() ? "oui" : "non")
+                              .append("   Écriture : ").append(one.canWrite() ? "oui" : "non")
+                              .append("   Caché : ").append(one.getName().startsWith(".") ? "oui" : "non").append('\n');
+                  } else {
+                      head.append(fs.size()).append(" éléments sélectionnés\n");
+                  }
+                  tv.setText(head + "Taille : calcul…");
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(tv);
+                  AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle(one != null ? "Propriétés" : "Propriétés de la sélection")
+                          .setView(sv).setPositiveButton("OK", null);
+                  if (one != null && one.isFile()) b.setNeutralButton("Calculer MD5", (d, w) -> md5(one));
+                  b.show();
+                  bg.execute(() -> {
+                      long size = 0;
+                      int files = 0, dirs = 0;
+                      ArrayDeque<File> st = new ArrayDeque<>();
+                      for (File f : fs) {
+                          if (f.isDirectory()) {
+                              dirs++;
+                              st.push(f);
+                          } else {
+                              files++;
+                              size += f.length();
+                          }
+                      }
+                      while (!st.isEmpty()) {
+                          File[] cs = st.pop().listFiles();
+                          if (cs == null) continue;
+                          for (File c : cs) {
+                              if (c.isDirectory()) {
+                                  dirs++;
+                                  st.push(c);
+                              } else {
+                                  files++;
+                                  size += c.length();
+                              }
+                          }
+                      }
+                      final String s = head + "Taille : " + fmtSize(size) + "  (" + String.format(Locale.FRANCE, "%,d", size) + " octets)\n"
+                              + "Contenu : " + files + " fichier(s), " + (one != null && one.isDirectory() ? dirs - 1 : dirs) + " dossier(s)";
+                      ui.post(() -> tv.setText(s));
+                  });
+              }
+
+              void md5(final File f) {
+                  final String[] result = new String[1];
+                  runOp("Calcul MD5…", op -> {
+                      op.total = f.length();
+                      op.current = f.getName();
+                      MessageDigest md = MessageDigest.getInstance("MD5");
+                      try (InputStream in = new FileInputStream(f)) {
+                          byte[] buf = new byte[256 * 1024];
+                          int n;
+                          while ((n = in.read(buf)) > 0) {
+                              if (op.cancel) return;
+                              md.update(buf, 0, n);
+                              op.done += n;
+                          }
+                      }
+                      StringBuilder sb = new StringBuilder();
+                      for (byte x : md.digest()) sb.append(String.format("%02x", x));
+                      result[0] = sb.toString();
+                  }, op -> {
+                      if (result[0] == null) return;
+                      TextView tv = text(f.getName() + "\n\nMD5 :\n" + result[0], 14, cText, false);
+                      tv.setTextIsSelectable(true);
+                      tv.setPadding(dp(22), dp(12), dp(22), dp(8));
+                      new AlertDialog.Builder(this).setTitle("Empreinte MD5").setView(tv)
+                              .setPositiveButton("Copier", (d, w) -> {
+                                  ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                                  cm.setPrimaryClip(ClipData.newPlainText("md5", result[0]));
+                                  toast("MD5 copié");
+                              }).setNegativeButton("Fermer", null).show();
+                  });
+              }
+
+              // ---------------------------------------------------------------- miniatures
+
+              @SuppressWarnings("deprecation")
+              void loadThumb(final String key, final ImageView iv, final boolean video) {
+                  if (thumbFailed.contains(key) || !thumbPending.add(key)) return;
+                  thumbExec.execute(() -> {
+                      Bitmap b = null;
+                      try {
+                          if (video) {
+                              b = ThumbnailUtils.createVideoThumbnail(key, MediaStore.Images.Thumbnails.MINI_KIND);
+                              if (b != null) {
+                                  Bitmap s = ThumbnailUtils.extractThumbnail(b, 144, 144);
+                                  if (s != b) b.recycle();
+                                  b = s;
+                              }
+                          } else {
+                              BitmapFactory.Options o = new BitmapFactory.Options();
+                              o.inJustDecodeBounds = true;
+                              BitmapFactory.decodeFile(key, o);
+                              int s = 1;
+                              while (o.outWidth / (s * 2) >= 144 && o.outHeight / (s * 2) >= 144) s *= 2;
+                              BitmapFactory.Options o2 = new BitmapFactory.Options();
+                              o2.inSampleSize = s;
+                              b = BitmapFactory.decodeFile(key, o2);
+                          }
+                      } catch (Throwable ignored) {
+                      }
+                      thumbPending.remove(key);
+                      if (b == null) {
+                          thumbFailed.add(key);
+                          return;
+                      }
+                      final Bitmap fb = b;
+                      thumbs.put(key, fb);
+                      ui.post(() -> {
+                          if (key.equals(iv.getTag())) {
+                              iv.setImageBitmap(fb);
+                              iv.setVisibility(View.VISIBLE);
+                          }
+                      });
+                  });
+              }
+
+              // ---------------------------------------------------------------- adaptateur
+
+              static class Holder {
+                  TextView icon, name, details, path, check;
+                  ImageView thumb;
+              }
+
+              class FileAdapter extends BaseAdapter {
+                  @Override
+                  public int getCount() {
+                      return items.size();
+                  }
+
+                  @Override
+                  public Object getItem(int p) {
+                      return items.get(p);
+                  }
+
+                  @Override
+                  public long getItemId(int p) {
+                      return p;
+                  }
+
+                  @Override
+                  public View getView(int pos, View cv, ViewGroup parent) {
+                      Holder h;
+                      if (cv == null) {
+                          h = new Holder();
+                          LinearLayout row = new LinearLayout(MainActivity.this);
+                          row.setOrientation(LinearLayout.HORIZONTAL);
+                          row.setGravity(Gravity.CENTER_VERTICAL);
+                          row.setPadding(dp(14), dp(9), dp(12), dp(9));
+                          row.setForeground(ripple(false));
+                          FrameLayout ib = new FrameLayout(MainActivity.this);
+                          h.icon = text("", 22, cText, false);
+                          h.icon.setGravity(Gravity.CENTER);
+                          ib.addView(h.icon, new FrameLayout.LayoutParams(-1, -1));
+                          h.thumb = new ImageView(MainActivity.this);
+                          h.thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                          h.thumb.setBackground(round(cDivider, 10));
+                          h.thumb.setClipToOutline(true);
+                          ib.addView(h.thumb, new FrameLayout.LayoutParams(-1, -1));
+                          row.addView(ib, new LinearLayout.LayoutParams(dp(46), dp(46)));
+                          LinearLayout c = new LinearLayout(MainActivity.this);
+                          c.setOrientation(LinearLayout.VERTICAL);
+                          c.setPadding(dp(14), 0, dp(8), 0);
+                          h.name = text("", 15, cText, false);
+                          h.name.setMaxLines(2);
+                          h.name.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                          h.details = text("", 12, cSub, false);
+                          h.path = text("", 11, cSub, false);
+                          h.path.setSingleLine(true);
+                          h.path.setEllipsize(TextUtils.TruncateAt.START);
+                          c.addView(h.name);
+                          c.addView(h.details);
+                          c.addView(h.path);
+                          row.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                          h.check = text("", 13, Color.WHITE, true);
+                          h.check.setGravity(Gravity.CENTER);
+                          row.addView(h.check, new LinearLayout.LayoutParams(dp(24), dp(24)));
+                          cv = row;
+                          cv.setTag(h);
+                      } else {
+                          h = (Holder) cv.getTag();
+                      }
+                      File f = items.get(pos);
+                      String key = f.getAbsolutePath();
+                      boolean dir = f.isDirectory();
+                      h.name.setText(displayName(f));
+                      h.name.setAlpha(f.getName().startsWith(".") && mode != M_TRASH ? 0.6f : 1f);
+                      String det;
+                      if (dir) {
+                          Integer n = childCount.get(key);
+                          det = (n == null || n < 0) ? "Dossier" : n + " élément(s)";
+                      } else det = fmtSize(f.length());
+                      h.details.setText(det + "   •   " + fmtDate(f.lastModified()));
+                      if (mode == M_LIST) {
+                          h.path.setVisibility(View.VISIBLE);
+                          h.path.setText(f.getParent());
+                      } else h.path.setVisibility(View.GONE);
+                      h.icon.setText(emoji(f));
+                      h.icon.setBackground(round(soft(typeColor(f)), 12));
+                      h.thumb.setTag(key);
+                      h.thumb.setImageDrawable(null);
+                      h.thumb.setVisibility(View.GONE);
+                      String e = ext(f);
+                      if (!dir && (IMG.contains(e) || VID.contains(e))) {
+                          Bitmap b = thumbs.get(key);
+                          if (b != null) {
+                              h.thumb.setImageBitmap(b);
+                              h.thumb.setVisibility(View.VISIBLE);
+                          } else loadThumb(key, h.thumb, VID.contains(e));
+                      }
+                      boolean sel = selected.contains(f);
+                      cv.setBackgroundColor(sel ? cSel : Color.TRANSPARENT);
+                      if (selected.isEmpty()) h.check.setVisibility(View.GONE);
+                      else {
+                          h.check.setVisibility(View.VISIBLE);
+                          GradientDrawable g = new GradientDrawable();
+                          g.setShape(GradientDrawable.OVAL);
+                          if (sel) g.setColor(cPrimary);
+                          else g.setStroke(dp(2), cSub);
+                          h.check.setBackground(g);
+                          h.check.setText(sel ? "✓" : "");
+                      }
+                      return cv;
+                  }
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/EditorActivity.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.text.Editable;
+          import android.text.InputType;
+          import android.text.TextUtils;
+          import android.text.TextWatcher;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.nio.charset.StandardCharsets;
+
+          public class EditorActivity extends Activity {
+
+              File file;
+              EditText et;
+              TextView title;
+              boolean dirty, loaded;
+              final Handler ui = new Handler(Looper.getMainLooper());
+
+              int dp(float v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              @Override
+              protected void onCreate(Bundle state) {
+                  boolean dark = getSharedPreferences("fp", MODE_PRIVATE).getBoolean("dark", false);
+                  setTheme(dark ? R.style.AppDark : R.style.AppTheme);
+                  super.onCreate(state);
+                  int bg = dark ? 0xFF121417 : 0xFFFFFFFF;
+                  int fg = dark ? 0xFFECEFF1 : 0xFF1A1F24;
+                  int primary = dark ? 0xFF1E88E5 : 0xFF1565C0;
+                  getWindow().setStatusBarColor(MainActivity.darker(primary));
+                  String path = getIntent().getStringExtra("path");
+                  if (path == null) {
+                      finish();
+                      return;
+                  }
+                  file = new File(path);
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setBackgroundColor(bg);
+                  LinearLayout top = new LinearLayout(this);
+                  top.setGravity(Gravity.CENTER_VERTICAL);
+                  top.setBackgroundColor(primary);
+                  top.setPadding(dp(4), dp(8), dp(4), dp(8));
+                  top.setElevation(dp(4));
+                  top.addView(btn("←", () -> onBackPressed()));
+                  title = new TextView(this);
+                  title.setText(file.getName());
+                  title.setTextColor(Color.WHITE);
+                  title.setTextSize(18);
+                  title.setTypeface(Typeface.DEFAULT_BOLD);
+                  title.setSingleLine(true);
+                  title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                  title.setPadding(dp(8), 0, dp(8), 0);
+                  top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+                  top.addView(btn("A−", () -> zoom(-1)));
+                  top.addView(btn("A+", () -> zoom(1)));
+                  top.addView(btn("💾", this::save));
+                  root.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+                  et = new EditText(this);
+                  et.setGravity(Gravity.TOP | Gravity.START);
+                  et.setTypeface(Typeface.MONOSPACE);
+                  et.setTextSize(TypedValue.COMPLEX_UNIT_SP, getSharedPreferences("fp", MODE_PRIVATE).getFloat("edsize", 14));
+                  et.setTextColor(fg);
+                  et.setBackgroundColor(bg);
+                  et.setPadding(dp(12), dp(12), dp(12), dp(12));
+                  et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                  et.setHint("Chargement…");
+                  root.addView(et, new LinearLayout.LayoutParams(-1, 0, 1));
+                  setContentView(root);
+
+                  new Thread(() -> {
+                      String txt;
+                      try (InputStream in = new FileInputStream(file)) {
+                          ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                          byte[] buf = new byte[65536];
+                          int n;
+                          while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+                          txt = new String(bo.toByteArray(), StandardCharsets.UTF_8);
+                      } catch (Exception e) {
+                          txt = null;
+                      }
+                      final String t = txt;
+                      ui.post(() -> {
+                          if (t == null) {
+                              Toast.makeText(this, "Lecture impossible", Toast.LENGTH_SHORT).show();
+                              finish();
+                              return;
+                          }
+                          et.setText(t);
+                          et.setHint("");
+                          loaded = true;
+                          et.addTextChangedListener(new TextWatcher() {
+                              public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+                              }
+
+                              public void onTextChanged(CharSequence s, int a, int b, int c) {
+                              }
+
+                              public void afterTextChanged(Editable s) {
+                                  if (!dirty) {
+                                      dirty = true;
+                                      title.setText("● " + file.getName());
+                                  }
+                              }
+                          });
+                      });
+                  }).start();
+              }
+
+              TextView btn(String s, Runnable r) {
+                  TextView t = new TextView(this);
+                  t.setText(s);
+                  t.setTextColor(Color.WHITE);
+                  t.setTextSize(18);
+                  t.setGravity(Gravity.CENTER);
+                  t.setMinWidth(dp(44));
+                  t.setPadding(dp(8), dp(6), dp(8), dp(6));
+                  TypedValue tv = new TypedValue();
+                  getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true);
+                  t.setBackground(getDrawable(tv.resourceId));
+                  t.setOnClickListener(v -> r.run());
+                  return t;
+              }
+
+              void zoom(int d) {
+                  float px = et.getTextSize() / getResources().getDisplayMetrics().scaledDensity;
+                  float sp = Math.max(8, Math.min(32, Math.round(px) + d * 2));
+                  et.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+                  getSharedPreferences("fp", MODE_PRIVATE).edit().putFloat("edsize", sp).apply();
+              }
+
+              void save() {
+                  save(null);
+              }
+
+              void save(final Runnable after) {
+                  if (!loaded) return;
+                  final String txt = et.getText().toString();
+                  new Thread(() -> {
+                      boolean ok;
+                      try (OutputStream o = new FileOutputStream(file)) {
+                          o.write(txt.getBytes(StandardCharsets.UTF_8));
+                          ok = true;
+                      } catch (Exception e) {
+                          ok = false;
+                      }
+                      final boolean fok = ok;
+                      ui.post(() -> {
+                          Toast.makeText(this, fok ? "Enregistré ✓" : "Échec de l'enregistrement", Toast.LENGTH_SHORT).show();
+                          if (fok) {
+                              dirty = false;
+                              title.setText(file.getName());
+                              if (after != null) after.run();
+                          }
+                      });
+                  }).start();
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (!dirty) {
+                      super.onBackPressed();
+                      return;
+                  }
+                  new AlertDialog.Builder(this).setTitle("Modifications non enregistrées")
+                          .setMessage("Voulez-vous enregistrer avant de quitter ?")
+                          .setPositiveButton("Enregistrer", (d, w) -> save(this::finish))
+                          .setNeutralButton("Quitter sans enregistrer", (d, w) -> finish())
+                          .setNegativeButton("Annuler", null).show();
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/FilesProvider.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.content.ContentProvider;
+          import android.content.ContentValues;
+          import android.database.Cursor;
+          import android.database.MatrixCursor;
+          import android.net.Uri;
+          import android.os.ParcelFileDescriptor;
+          import android.provider.OpenableColumns;
+
+          import java.io.File;
+          import java.io.FileNotFoundException;
+
+          public class FilesProvider extends ContentProvider {
+
+              public static final String AUTH = "com.fichierspro.app.files";
+
+              public static Uri uriFor(File f) {
+                  return new Uri.Builder().scheme("content").authority(AUTH).path(f.getAbsolutePath()).build();
+              }
+
+              static File fileOf(Uri u) {
+                  return new File(u.getPath());
+              }
+
+              @Override
+              public boolean onCreate() {
+                  return true;
+              }
+
+              @Override
+              public String getType(Uri uri) {
+                  return MainActivity.mimeOf(fileOf(uri));
+              }
+
+              @Override
+              public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+                  File f = fileOf(uri);
+                  if (!f.isFile()) throw new FileNotFoundException(f.getPath());
+                  return ParcelFileDescriptor.open(f, ParcelFileDescriptor.parseMode(mode));
+              }
+
+              @Override
+              public Cursor query(Uri uri, String[] projection, String sel, String[] args, String sort) {
+                  File f = fileOf(uri);
+                  String[] cols = projection != null ? projection : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+                  MatrixCursor c = new MatrixCursor(cols, 1);
+                  Object[] row = new Object[cols.length];
+                  for (int i = 0; i < cols.length; i++) {
+                      if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) row[i] = f.getName();
+                      else if (OpenableColumns.SIZE.equals(cols[i])) row[i] = f.length();
+                  }
+                  c.addRow(row);
+                  return c;
+              }
+
+              @Override
+              public Uri insert(Uri uri, ContentValues v) {
+                  return null;
+              }
+
+              @Override
+              public int delete(Uri uri, String s, String[] a) {
+                  return 0;
+              }
+
+              @Override
+              public int update(Uri uri, ContentValues v, String s, String[] a) {
+                  return 0;
+              }
+          }
+          FIN_DU_FICHIER
+          echo 'MIIKLAIBAzCCCdYGCSqGSIb3DQEHAaCCCccEggnDMIIJvzCCBaYGCSqGSIb3DQEHAaCCBZcEggWTMIIFjzCCBYsGCyqGSIb3DQEMCgECoIIFQDCCBTwwZgYJKoZIhvcNAQUNMFkwOAYJKoZIhvcNAQUMMCsEFHX3fPUN6XwEu4Id+quoLA1TlP9qAgInEAIBIDAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQwkTT93M1xiNBbSty0CUoHwSCBNCbUOWuQwN0Mg3+xmKACv+cnSKIoALsw7dwlMuaGNEBCJi9lAmNe1rjleBhl4izUcJzURooVoifQ7fArAJb3qyVK5QBVlWa9FRMua9F5ulY0aImMgHqELDb0iWZCRLulwBRp3Ef3VPMPh3at4LBzoOONHXsTQress2SCREr3sMDPHKnHXeGSaXtM/b7JxfF5DWa2EcyH1EN16zqhITC2eW5Eo0oqHseA0oVdNrXxSuYtZRVZ0ecLlyCAoaHKjdLBes7MkNTuG6iBYc3yCLJ8fFPee5vbcCqLxFE/VcSqXybOxMPDSGyGWC9XLZvQCU14t4Ajg38QpIYmtCs8E2dFKEMkm9b4kRrkr+03T/ToKISmFSxUmE8io/c2m/BbUTT1m2gF0exjIfhYyCzbpertpIz7WAEyU2qFK6H83WEJBan/i5stgjVcG81kAZFKUxrfXikjfAjzXuwX4YGXZMjNCOZPHFrzSaQoHqILnUeLIfuoT+yNWw3AtDJGi4XKjVmNjgx4q1+jDcRIdCEBiu4hk0yiGDuuKlAcroqxukS7SpzCHm7nVm6UgKpFPJkzpkmmcvfOojvJdbfytJ9Ould/y+t4KsZAj5OLRYR+KZ35fDpwbv6I0c+9jxu7JPLoYHENnG38BlHikVazOGss6Zr9l45tv0r1YyDm0uTzqEgq+cB359iv50hk7jWyRU76RjixrTum6/UFBjsTMWjCHflUSRPbCqFLSRqQa2Jce+d9mgnLbPJ257XSXu6TPK4BQGvO3koVF0706V5oK4QRvAzwZh9t6rkz7Re/YbqWLVjjaenY5gjfnuDavCyZT4o7zib6PzRm8LFiM5W2WcruHLMKgY1BGpEAY36TqXY36ut/dl5d6vfcST9ckJq1jBkJCIPg8WW+cPfEW1xE4pd0BBUcZ6/pB1j86tRN6NSs2h/B5hUA7OIJ7Q7KU9R/13lwhWfHC3C2avXMfBAb02jM9xYNpNn6BTRDpx4wgPLzs9jWVtCNF+pKbKDfE5OhowVlPCPng8fSw1tegjpUxFaZVv9oH6VdD5JjgN7/wFtijEMgiO/o/oyfOhKOkuv4JIE6XXwNarOdB7ssuYmgupVab5/ZlbVyOGay8ACpar1qWegJTip/QN6k2ofIho7LXi4Qz8+IRlAFpjDBYJPTobj8KeaipovXRdPd5i1gtX2BC5GpWtb09sI1pwFUQreNyDI0Um2l+c6o3HeOZ6OcHNl/fx1hhm2o6iefzGm8VI5xK1kNUzBdAso8H5xnzR0OpWaC7wGilZNvE9q/R3Wa1rJeyz3ucm2ewe25SckOr1YNPBjnKoGcKGncLaVKCK4xPJu2KSsF6ZJ84DdSUfg4erIkvE2lo0IyKvcNqz104f4d83SeTdDlPSEUxqQLcg4lUodF09GqNfPSwWmEe47XzqJJGcVyprIinu452PkqxRRLB4npBSPXh5hf84IewUWTbKMzhgK+zmGY7z5Kr2u6FBVTu3kT3st4wqwXotQ51zQegxTrc8NOhAdxLvE1dakZgf+ieWy1MDJCSLme6+qNDc7IqajMNyYf9qNDsLaYNkH8MldlBZsRA5A9/ViUHeS3hv3lJ7jjbYM+HPwJE2LqOAItWyWIZb+BjINSLFqqvGYfU97DoLRaDE4MBMGCSqGSIb3DQEJFDEGHgQAZgBwMCEGCSqGSIb3DQEJFTEUBBJUaW1lIDE3OTM4NzEyNjI0NDAwggQRBgkqhkiG9w0BBwagggQCMIID/gIBADCCA/cGCSqGSIb3DQEHATBmBgkqhkiG9w0BBQ0wWTA4BgkqhkiG9w0BBQwwKwQUkt3ZjQxwVZLMpgVyArKrhwrs7D8CAicQAgEgMAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBCAloIAEaNnAbYmekzkVOpmgIIDgPS9fPeDWVUXnaoEQQTs3UZWI9sBX3Fs6fv6jEvTkizLT46F6+EjUZZOEZFiac3QMV1zmT74oD7qPB5YAQrf1LDpMDETO2J9mfL6UuQDpSh2OSrXN1W0AhDomzNdVjSvorKWp3gmwx6uA503wb7iMkKyIqKo+ANeraboOO7IzbuJ3VIHXP3LtKG9+M7aCmsqkLn4+piFRHgjz3sobZO03+JWNm6+NyuACgqJFJrSX64zzCCaEaWO9RPSL/1B9RaslQmcTRN475Zj2/ktoTCX+EsWrvE8qk0rh7EENLD5q+Ow0pacN0HIi0tdo+HnHEomAyeAz5IAuRs3swpxf9boc6CGcotS1BVJRyRFDNyQwvjkF4HdSjMFFagxvFxx8lrrvkjE4jQfpOXhyW6vDISiuq2WOTY7r9Kn32kO1ErvtBYXgL+Af27QxGBTwA/dYr83ID7HyAVk5BZCM4NsKm4iqdAWb6Xbs8CGRvNxFHoS0CH/bVZAsbDconUJAByu1S0rGMieIUd0YvEgmz8+4+TD5pAtqTwP1hXYcLGX3qrUgQbcqDQNdYDkXgRC5VkhSKQ8xtLUaWqMzQhAolFHfFgMGcHgNpcOmnZJvzl7nyQgDKmRSG9fjlQGZwzaPeK5QPfVlG+OgHjo2E3Rz47+lL+H2tnt1eHLPOrGMblf1FHzOpZyUMkld9R7afjyoXriNBMefwELd9QeaGqeC47U6WgcoeyEjNKeXftyK3UxUoWc1GJ4BtrRp0wUeyavVLeB3h5p6EUGjqfF0xzfYNChRxzfAkOahFZJYCYZgEit6BJiN7IedN3VaNOyizEhRvh85JNMu6f4+vJoVU4Z8uUANa4J22twdgq8qE2pFoFl1ALZe2Ixc3MEuvvgl7XMuMwlhgL9o2/Yt2x31AkdlWbdgomg6jf5NNYYCLE3TeOolK+jKG2tg+YX8/j55mm6C9nOXHtFkPQ0L3j5fWhsu44PsDV1kidS2p8zvrPFvTS2wlbOMwxyg3mVGsrnNBoIW+WzYjuRWl/K/MBl/W1ukos/a5OrIaC9HE8kTZW3SVivL/csq+pBDXsogrLGAqMQg6HSiBdkwmM+piTxQnk2E0Dyax8KHpbxMMhBXDV4KLGmnElAPV/4QpLF7Xk0KFBXLzTvp7z0cWVROPEokxTuxhR8H1OZJjeL7KnPMLBGujmKdEfhJ+poME0wMTANBglghkgBZQMEAgEFAAQgV6PvT40RmvXiWU5h80kokArk1FPjagQZGeiiewgksrYEFDuIYacG3cC/DVmMC/yXz62r+uqGAgInEA==' | base64 -d > app/release.jks
+
+      - name: Compiler l'APK
+        working-directory: projet
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace
+          mkdir -p ../sortie
+          cp app/build/outputs/apk/release/*.apk ../sortie/FichiersPro.apk
+
+      - name: Publier l'APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FichiersPro-APK
+          path: sortie/FichiersPro.apk
