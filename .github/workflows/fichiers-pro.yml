@@ -1,4 +1,4 @@
-# Fichiers Pro — gestionnaire de fichiers Android (APK native)
+# Fichiers Pro 2.0 — gestionnaire de fichiers Android (APK native)
 # Mettre ce fichier dans GitHub : .github/workflows/fichiers-pro.yml
 # Puis : onglet Actions > "Construire Fichiers Pro" > Run workflow.
 # L'APK se télécharge dans l'onglet Actions > dernier build > Artifacts.
@@ -60,8 +60,8 @@ jobs:
                   applicationId 'com.fichierspro.app'
                   minSdk 26
                   targetSdk 34
-                  versionCode 1
-                  versionName '1.0'
+                  versionCode 2
+                  versionName '2.0'
               }
               signingConfigs {
                   release {
@@ -104,6 +104,7 @@ jobs:
                   android:roundIcon="@mipmap/ic_launcher"
                   android:label="Fichiers Pro"
                   android:requestLegacyExternalStorage="true"
+                  android:largeHeap="true"
                   android:theme="@style/AppTheme">
 
                   <activity
@@ -170,6 +171,1080 @@ jobs:
           </vector>
           FIN_DU_FICHIER
           mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/EditorActivity.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.text.Editable;
+          import android.text.InputType;
+          import android.text.TextUtils;
+          import android.text.TextWatcher;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.nio.charset.StandardCharsets;
+
+          public class EditorActivity extends Activity {
+
+              File file;
+              EditText et;
+              TextView title;
+              boolean dirty, loaded;
+              final Handler ui = new Handler(Looper.getMainLooper());
+
+              int dp(float v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              @Override
+              protected void onCreate(Bundle state) {
+                  boolean dark = getSharedPreferences("fp", MODE_PRIVATE).getBoolean("dark", false);
+                  setTheme(dark ? R.style.AppDark : R.style.AppTheme);
+                  super.onCreate(state);
+                  int bg = dark ? 0xFF121417 : 0xFFFFFFFF;
+                  int fg = dark ? 0xFFECEFF1 : 0xFF1A1F24;
+                  int primary = dark ? 0xFF1E88E5 : 0xFF1565C0;
+                  getWindow().setStatusBarColor(MainActivity.darker(primary));
+                  String path = getIntent().getStringExtra("path");
+                  if (path == null) {
+                      finish();
+                      return;
+                  }
+                  file = new File(path);
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setBackgroundColor(bg);
+                  LinearLayout top = new LinearLayout(this);
+                  top.setGravity(Gravity.CENTER_VERTICAL);
+                  top.setBackgroundColor(primary);
+                  top.setPadding(dp(4), dp(8), dp(4), dp(8));
+                  top.setElevation(dp(4));
+                  top.addView(btn("←", () -> onBackPressed()));
+                  title = new TextView(this);
+                  title.setText(file.getName());
+                  title.setTextColor(Color.WHITE);
+                  title.setTextSize(18);
+                  title.setTypeface(Typeface.DEFAULT_BOLD);
+                  title.setSingleLine(true);
+                  title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                  title.setPadding(dp(8), 0, dp(8), 0);
+                  top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+                  top.addView(btn("A−", () -> zoom(-1)));
+                  top.addView(btn("A+", () -> zoom(1)));
+                  top.addView(btn("💾", this::save));
+                  root.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+                  et = new EditText(this);
+                  et.setGravity(Gravity.TOP | Gravity.START);
+                  et.setTypeface(Typeface.MONOSPACE);
+                  et.setTextSize(TypedValue.COMPLEX_UNIT_SP, getSharedPreferences("fp", MODE_PRIVATE).getFloat("edsize", 14));
+                  et.setTextColor(fg);
+                  et.setBackgroundColor(bg);
+                  et.setPadding(dp(12), dp(12), dp(12), dp(12));
+                  et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                  et.setHint("Chargement…");
+                  root.addView(et, new LinearLayout.LayoutParams(-1, 0, 1));
+                  setContentView(root);
+
+                  new Thread(() -> {
+                      String txt;
+                      try (InputStream in = new FileInputStream(file)) {
+                          ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                          byte[] buf = new byte[65536];
+                          int n;
+                          while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+                          txt = new String(bo.toByteArray(), StandardCharsets.UTF_8);
+                      } catch (Exception e) {
+                          txt = null;
+                      }
+                      final String t = txt;
+                      ui.post(() -> {
+                          if (t == null) {
+                              Toast.makeText(this, "Lecture impossible", Toast.LENGTH_SHORT).show();
+                              finish();
+                              return;
+                          }
+                          et.setText(t);
+                          et.setHint("");
+                          loaded = true;
+                          et.addTextChangedListener(new TextWatcher() {
+                              public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+                              }
+
+                              public void onTextChanged(CharSequence s, int a, int b, int c) {
+                              }
+
+                              public void afterTextChanged(Editable s) {
+                                  if (!dirty) {
+                                      dirty = true;
+                                      title.setText("● " + file.getName());
+                                  }
+                              }
+                          });
+                      });
+                  }).start();
+              }
+
+              TextView btn(String s, Runnable r) {
+                  TextView t = new TextView(this);
+                  t.setText(s);
+                  t.setTextColor(Color.WHITE);
+                  t.setTextSize(18);
+                  t.setGravity(Gravity.CENTER);
+                  t.setMinWidth(dp(44));
+                  t.setPadding(dp(8), dp(6), dp(8), dp(6));
+                  TypedValue tv = new TypedValue();
+                  getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true);
+                  t.setBackground(getDrawable(tv.resourceId));
+                  t.setOnClickListener(v -> r.run());
+                  return t;
+              }
+
+              void zoom(int d) {
+                  float px = et.getTextSize() / getResources().getDisplayMetrics().scaledDensity;
+                  float sp = Math.max(8, Math.min(32, Math.round(px) + d * 2));
+                  et.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+                  getSharedPreferences("fp", MODE_PRIVATE).edit().putFloat("edsize", sp).apply();
+              }
+
+              void save() {
+                  save(null);
+              }
+
+              void save(final Runnable after) {
+                  if (!loaded) return;
+                  final String txt = et.getText().toString();
+                  new Thread(() -> {
+                      boolean ok;
+                      try (OutputStream o = new FileOutputStream(file)) {
+                          o.write(txt.getBytes(StandardCharsets.UTF_8));
+                          ok = true;
+                      } catch (Exception e) {
+                          ok = false;
+                      }
+                      final boolean fok = ok;
+                      ui.post(() -> {
+                          Toast.makeText(this, fok ? "Enregistré ✓" : "Échec de l'enregistrement", Toast.LENGTH_SHORT).show();
+                          if (fok) {
+                              dirty = false;
+                              title.setText(file.getName());
+                              if (after != null) after.run();
+                          }
+                      });
+                  }).start();
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (!dirty) {
+                      super.onBackPressed();
+                      return;
+                  }
+                  new AlertDialog.Builder(this).setTitle("Modifications non enregistrées")
+                          .setMessage("Voulez-vous enregistrer avant de quitter ?")
+                          .setPositiveButton("Enregistrer", (d, w) -> save(this::finish))
+                          .setNeutralButton("Quitter sans enregistrer", (d, w) -> finish())
+                          .setNegativeButton("Annuler", null).show();
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/FileIndex.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.database.Cursor;
+          import android.database.sqlite.SQLiteDatabase;
+          import android.database.sqlite.SQLiteOpenHelper;
+          import android.database.sqlite.SQLiteStatement;
+          import android.os.Environment;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.os.SystemClock;
+          import android.provider.MediaStore;
+
+          import java.io.File;
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.HashMap;
+          import java.util.HashSet;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.Map;
+          import java.util.concurrent.atomic.AtomicBoolean;
+          import java.util.concurrent.atomic.AtomicLong;
+
+          /**
+           * Index persistant du stockage (SQLite).
+           * - Les écrans lisent l'index : affichage immédiat, même au démarrage à froid.
+           * - La mise à jour se fait en arrière-plan, de façon incrémentale (seuls les dossiers modifiés sont relus).
+           * - Au tout premier lancement, l'index est amorcé depuis MediaStore (l'index du système).
+           */
+          final class FileIndex extends SQLiteOpenHelper {
+
+              static final int BIG = 100;
+              static final long BIG_MIN = 10L * 1024 * 1024;
+              private static final long FULL_EVERY = 6L * 3600 * 1000;
+
+              private static FileIndex inst;
+
+              static synchronized FileIndex get(Context c) {
+                  if (inst == null) inst = new FileIndex(c.getApplicationContext());
+                  return inst;
+              }
+
+              private final Context ctx;
+              private final Handler ui = new Handler(Looper.getMainLooper());
+              final AtomicLong version = new AtomicLong(1);
+              volatile boolean syncing;
+              volatile Runnable listener;
+              private boolean again, againFull;
+              private volatile long lastNotify, lastSyncEnd;
+              private SearchEngine.Snapshot snap;
+              private final Object snapLock = new Object();
+
+              private FileIndex(Context c) {
+                  super(c, "index.db", null, 2);
+                  ctx = c;
+                  setWriteAheadLoggingEnabled(true);
+              }
+
+              @Override
+              public void onConfigure(SQLiteDatabase db) {
+                  try {
+                      db.execSQL("PRAGMA synchronous=NORMAL");
+                  } catch (Throwable ignored) {
+                  }
+              }
+
+              @Override
+              public void onCreate(SQLiteDatabase db) {
+                  db.execSQL("CREATE TABLE files(path TEXT PRIMARY KEY, parent TEXT NOT NULL, name TEXT NOT NULL,"
+                          + " size INTEGER NOT NULL, mtime INTEGER NOT NULL, isdir INTEGER NOT NULL,"
+                          + " cat INTEGER NOT NULL, hidden INTEGER NOT NULL)");
+                  db.execSQL("CREATE INDEX idx_parent ON files(parent)");
+                  db.execSQL("CREATE INDEX idx_cat ON files(cat, mtime)");
+                  db.execSQL("CREATE INDEX idx_size ON files(size)");
+                  db.execSQL("CREATE TABLE dirs(path TEXT PRIMARY KEY, mtime INTEGER NOT NULL)");
+              }
+
+              @Override
+              public void onUpgrade(SQLiteDatabase db, int o, int n) {
+                  db.execSQL("DROP TABLE IF EXISTS files");
+                  db.execSQL("DROP TABLE IF EXISTS dirs");
+                  onCreate(db);
+                  ctx.getSharedPreferences("fp", 0).edit().remove("idx_full").apply();
+              }
+
+              @Override
+              public void onDowngrade(SQLiteDatabase db, int o, int n) {
+                  onUpgrade(db, o, n);
+              }
+
+              // ------------------------------------------------------------ racines
+
+              static File internalRoot() {
+                  return Environment.getExternalStorageDirectory();
+              }
+
+              static String trashPath() {
+                  return new File(internalRoot(), ".CorbeilleFichiersPro").getAbsolutePath();
+              }
+
+              static List<String> roots(Context c) {
+                  ArrayList<String> out = new ArrayList<>();
+                  out.add(internalRoot().getAbsolutePath());
+                  try {
+                      File[] dirs = c.getExternalFilesDirs(null);
+                      if (dirs != null) {
+                          for (int i = 1; i < dirs.length; i++) {
+                              if (dirs[i] == null) continue;
+                              String p = dirs[i].getAbsolutePath();
+                              int k = p.indexOf("/Android/data");
+                              if (k > 0) {
+                                  String r = p.substring(0, k);
+                                  if (!out.contains(r)) out.add(r);
+                              }
+                          }
+                      }
+                  } catch (Throwable ignored) {
+                  }
+                  return out;
+              }
+
+              static int catOf(String name) {
+                  int i = name.lastIndexOf('.');
+                  if (i <= 0) return 0;
+                  String e = name.substring(i + 1).toLowerCase(Locale.ROOT);
+                  if (MainActivity.IMG.contains(e)) return 1;
+                  if (MainActivity.VID.contains(e)) return 2;
+                  if (MainActivity.AUD.contains(e)) return 3;
+                  if (MainActivity.DOC.contains(e)) return 4;
+                  if (MainActivity.APK.contains(e)) return 5;
+                  if (MainActivity.ARC.contains(e)) return 6;
+                  return 0;
+              }
+
+              private static boolean hiddenDir(String dir, List<String> roots) {
+                  if (dir.contains("/.")) return true;
+                  for (String r : roots) {
+                      if (dir.startsWith(r)) {
+                          String rel = dir.substring(r.length());
+                          if (rel.equals("/Android/data") || rel.startsWith("/Android/data/")
+                                  || rel.equals("/Android/obb") || rel.startsWith("/Android/obb/")) return true;
+                      }
+                  }
+                  return false;
+              }
+
+              // ------------------------------------------------------------ synchronisation
+
+              void syncIfStale(long ms) {
+                  if (!syncing && SystemClock.uptimeMillis() - lastSyncEnd > ms) requestSync(false);
+              }
+
+              synchronized void requestSync(boolean full) {
+                  if (syncing) {
+                      again = true;
+                      againFull |= full;
+                      return;
+                  }
+                  syncing = true;
+                  final boolean f = full;
+                  Thread t = new Thread(new Runnable() {
+                      @Override
+                      public void run() {
+                          runSync(f);
+                      }
+                  }, "index-sync");
+                  t.setPriority(Thread.NORM_PRIORITY - 1);
+                  t.start();
+              }
+
+              private void runSync(boolean full) {
+                  boolean f = full;
+                  while (true) {
+                      try {
+                          doSync(f);
+                      } catch (Throwable ignored) {
+                      }
+                      synchronized (this) {
+                          if (again) {
+                              again = false;
+                              f = againFull;
+                              againFull = false;
+                              continue;
+                          }
+                          syncing = false;
+                          lastSyncEnd = SystemClock.uptimeMillis();
+                          break;
+                      }
+                  }
+                  post();
+              }
+
+              private void post() {
+                  lastNotify = SystemClock.uptimeMillis();
+                  ui.post(new Runnable() {
+                      @Override
+                      public void run() {
+                          Runnable l = listener;
+                          if (l != null) l.run();
+                      }
+                  });
+              }
+
+              private void changed() {
+                  version.incrementAndGet();
+                  if (SystemClock.uptimeMillis() - lastNotify >= 800) post();
+              }
+
+              private static void range(SQLiteDatabase db, String table, String dir) {
+                  db.execSQL("DELETE FROM " + table + " WHERE path >= ? AND path < ?", new Object[]{dir + "/", dir + "0"});
+              }
+
+              private void doSync(boolean fullAsked) {
+                  final SQLiteDatabase db = getWritableDatabase();
+                  final SharedPreferences prefs = ctx.getSharedPreferences("fp", 0);
+                  final long now = System.currentTimeMillis();
+                  final boolean full = fullAsked || now - prefs.getLong("idx_full", 0) > FULL_EVERY;
+                  final List<String> roots = roots(ctx);
+                  final String trash = trashPath();
+
+                  // lignes d'un stockage retiré (carte SD enlevée…)
+                  StringBuilder w = new StringBuilder();
+                  ArrayList<Object> args = new ArrayList<>();
+                  for (String r : roots) {
+                      if (w.length() > 0) w.append(" OR ");
+                      w.append("(path >= ? AND path < ?)");
+                      args.add(r + "/");
+                      args.add(r + "0");
+                  }
+                  db.execSQL("DELETE FROM files WHERE NOT (" + w + ")", args.toArray());
+                  db.execSQL("DELETE FROM dirs WHERE NOT (" + w + " OR path IN ("
+                          + placeholders(roots.size()) + "))", concat(args, roots));
+
+                  final SQLiteStatement ins = db.compileStatement(
+                          "INSERT OR REPLACE INTO files(path,parent,name,size,mtime,isdir,cat,hidden) VALUES(?,?,?,?,?,?,?,?)");
+                  final SQLiteStatement del = db.compileStatement("DELETE FROM files WHERE path=?");
+                  final SQLiteStatement delDir = db.compileStatement("DELETE FROM dirs WHERE path=?");
+                  final SQLiteStatement setDir = db.compileStatement("INSERT OR REPLACE INTO dirs(path,mtime) VALUES(?,?)");
+                  final AtomicBoolean cancel = new AtomicBoolean();
+                  try {
+                      if (count(db) == 0) {
+                          bootstrap(db, ins, roots, trash);
+                          changed();
+                          post();
+                      }
+                      final HashMap<String, Long> dirState = new HashMap<>();
+                      final HashMap<String, ArrayList<String>> childDirs = new HashMap<>();
+                      if (!full) {
+                          Cursor c = db.rawQuery("SELECT path,mtime FROM dirs", null);
+                          try {
+                              while (c.moveToNext()) dirState.put(c.getString(0), c.getLong(1));
+                          } finally {
+                              c.close();
+                          }
+                          c = db.rawQuery("SELECT path,parent FROM files WHERE isdir=1", null);
+                          try {
+                              while (c.moveToNext()) {
+                                  String par = c.getString(1);
+                                  ArrayList<String> l = childDirs.get(par);
+                                  if (l == null) {
+                                      l = new ArrayList<>();
+                                      childDirs.put(par, l);
+                                  }
+                                  l.add(c.getString(0));
+                              }
+                          } finally {
+                              c.close();
+                          }
+                      }
+                      HashSet<String> excluded = new HashSet<>();
+                      excluded.add(trash);
+                      final int[] n = {0, 0};
+                      final long[] last = {SystemClock.uptimeMillis()};
+                      int threads = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() - 1));
+                      IndexWalker.walk(roots, dirState, childDirs, excluded, full, threads, new IndexWalker.Sink() {
+                          @Override
+                          public void onDir(IndexWalker.DirResult r) {
+                              if (!db.inTransaction()) db.beginTransactionNonExclusive();
+                              n[1] += applyDir(db, r, roots, trash, ins, del, delDir, setDir);
+                              if (++n[0] % 120 == 0 || SystemClock.uptimeMillis() - last[0] > 500) {
+                                  db.setTransactionSuccessful();
+                                  db.endTransaction();
+                                  last[0] = SystemClock.uptimeMillis();
+                                  if (n[1] > 0) {
+                                      n[1] = 0;
+                                      changed();
+                                  }
+                              }
+                          }
+                      }, cancel);
+                      if (db.inTransaction()) {
+                          db.setTransactionSuccessful();
+                          db.endTransaction();
+                      }
+                      if (n[1] > 0) version.incrementAndGet();
+                      if (full) prefs.edit().putLong("idx_full", now).apply();
+                  } finally {
+                      cancel.set(true);
+                      if (db.inTransaction()) db.endTransaction();
+                      ins.close();
+                      del.close();
+                      delDir.close();
+                      setDir.close();
+                  }
+              }
+
+              private static String placeholders(int n) {
+                  StringBuilder b = new StringBuilder();
+                  for (int i = 0; i < n; i++) b.append(i == 0 ? "?" : ",?");
+                  return b.toString();
+              }
+
+              private static Object[] concat(ArrayList<Object> a, List<String> b) {
+                  ArrayList<Object> o = new ArrayList<>(a);
+                  o.addAll(b);
+                  return o.toArray();
+              }
+
+              private static long count(SQLiteDatabase db) {
+                  Cursor c = db.rawQuery("SELECT COUNT(*) FROM files", null);
+                  try {
+                      return c.moveToFirst() ? c.getLong(0) : 0;
+                  } finally {
+                      c.close();
+                  }
+              }
+
+              private static void bind(SQLiteStatement ins, String path, String parent, String name, long size, long mtime,
+                                       boolean dir, boolean hidden) {
+                  ins.bindString(1, path);
+                  ins.bindString(2, parent);
+                  ins.bindString(3, name);
+                  ins.bindLong(4, size);
+                  ins.bindLong(5, mtime);
+                  ins.bindLong(6, dir ? 1 : 0);
+                  ins.bindLong(7, dir ? 0 : catOf(name));
+                  ins.bindLong(8, hidden ? 1 : 0);
+                  ins.execute();
+              }
+
+              /** Premier lancement : on récupère tout de suite ce que le système a déjà indexé. */
+              private void bootstrap(SQLiteDatabase db, SQLiteStatement ins, List<String> roots, String trash) {
+                  Cursor c = null;
+                  try {
+                      c = ctx.getContentResolver().query(MediaStore.Files.getContentUri("external"),
+                              new String[]{"_data", "_size", "date_modified"}, null, null, null);
+                      if (c == null) return;
+                      db.beginTransactionNonExclusive();
+                      try {
+                          String lastParent = null;
+                          boolean lastHidden = false, lastOk = false;
+                          while (c.moveToNext()) {
+                              String path = c.getString(0);
+                              if (path == null) continue;
+                              int sl = path.lastIndexOf('/');
+                              if (sl <= 0 || sl == path.length() - 1) continue;
+                              String name = path.substring(sl + 1);
+                              if (catOf(name) == 0) continue;
+                              String parent = path.substring(0, sl);
+                              if (!parent.equals(lastParent)) {
+                                  lastParent = parent;
+                                  lastOk = false;
+                                  for (String r : roots) if (parent.equals(r) || parent.startsWith(r + "/")) lastOk = true;
+                                  if (parent.equals(trash) || parent.startsWith(trash + "/")) lastOk = false;
+                                  lastHidden = hiddenDir(parent, roots);
+                              }
+                              if (!lastOk) continue;
+                              bind(ins, path, parent, name, c.isNull(1) ? 0 : c.getLong(1),
+                                      c.isNull(2) ? 0 : c.getLong(2) * 1000L, false, lastHidden || name.startsWith("."));
+                          }
+                          db.setTransactionSuccessful();
+                      } finally {
+                          db.endTransaction();
+                      }
+                  } catch (Throwable ignored) {
+                  } finally {
+                      if (c != null) c.close();
+                  }
+              }
+
+              private static int applyDir(SQLiteDatabase db, IndexWalker.DirResult r, List<String> roots, String trash,
+                                          SQLiteStatement ins, SQLiteStatement del, SQLiteStatement delDir,
+                                          SQLiteStatement setDir) {
+                  String dir = r.dir;
+                  HashMap<String, long[]> old = new HashMap<>();
+                  Cursor c = db.rawQuery("SELECT name,size,mtime,isdir FROM files WHERE parent=?", new String[]{dir});
+                  try {
+                      while (c.moveToNext()) old.put(c.getString(0), new long[]{c.getLong(1), c.getLong(2), c.getLong(3)});
+                  } finally {
+                      c.close();
+                  }
+                  boolean dirHidden = hiddenDir(dir, roots);
+                  // un fichier tout récent peut encore grossir (téléchargement, vidéo en cours) :
+                  // dans ce cas le dossier sera relu au prochain passage
+                  long youngAfter = System.currentTimeMillis() - 10 * 60 * 1000L;
+                  boolean young = false;
+                  int ch = 0;
+                  for (IndexWalker.Entry e : r.entries) {
+                      String path = IndexWalker.join(dir, e.name);
+                      if (path.equals(trash)) continue;
+                      if (!e.dir && e.mtime > youngAfter) young = true;
+                      long[] o = old.remove(e.name);
+                      boolean typeChanged = o != null && (o[2] == 1) != e.dir;
+                      if (typeChanged) {
+                          range(db, "files", path);
+                          range(db, "dirs", path);
+                          delDir.bindString(1, path);
+                          delDir.execute();
+                      }
+                      if (o == null || typeChanged || o[0] != e.size || o[1] != e.mtime) {
+                          bind(ins, path, dir, e.name, e.size, e.mtime, e.dir, dirHidden || e.name.startsWith("."));
+                          ch++;
+                      }
+                  }
+                  for (Map.Entry<String, long[]> g : old.entrySet()) {
+                      String path = IndexWalker.join(dir, g.getKey());
+                      del.bindString(1, path);
+                      del.execute();
+                      if (g.getValue()[2] == 1) {
+                          range(db, "files", path);
+                          range(db, "dirs", path);
+                          delDir.bindString(1, path);
+                          delDir.execute();
+                      }
+                      ch++;
+                  }
+                  setDir.bindString(1, dir);
+                  setDir.bindLong(2, young ? 0 : r.mtime);
+                  setDir.execute();
+                  return ch;
+              }
+
+              // ------------------------------------------------------------ lectures
+
+              private static String cond(int kind, boolean hidden) {
+                  String c = kind == BIG ? "isdir=0 AND size>" + BIG_MIN : "cat=" + kind + " AND isdir=0";
+                  return hidden ? c : c + " AND hidden=0";
+              }
+
+              /** Une page de la catégorie (limit = -1 : tout le reste). */
+              ArrayList<IFile> list(int kind, boolean hidden, int limit, int offset) {
+                  ArrayList<IFile> out = new ArrayList<>();
+                  try {
+                      Cursor c = getReadableDatabase().rawQuery("SELECT path,size,mtime FROM files WHERE " + cond(kind, hidden)
+                              + " ORDER BY " + (kind == BIG ? "size DESC" : "mtime DESC")
+                              + " LIMIT " + limit + " OFFSET " + offset, null);
+                      try {
+                          while (c.moveToNext()) out.add(new IFile(c.getString(0), false, c.getLong(1), c.getLong(2)));
+                      } finally {
+                          c.close();
+                      }
+                  } catch (Throwable ignored) {
+                  }
+                  return out;
+              }
+
+              /** {nombre, taille totale} */
+              long[] stats(int kind, boolean hidden) {
+                  long[] r = new long[2];
+                  try {
+                      Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*),SUM(size) FROM files WHERE "
+                              + cond(kind, hidden), null);
+                      try {
+                          if (c.moveToFirst()) {
+                              r[0] = c.getLong(0);
+                              r[1] = c.isNull(1) ? 0 : c.getLong(1);
+                          }
+                      } finally {
+                          c.close();
+                      }
+                  } catch (Throwable ignored) {
+                  }
+                  return r;
+              }
+
+              /** [0] = gros fichiers, [1..6] = catégories ; chaque ligne {nombre, taille}. */
+              long[][] allStats(boolean hidden) {
+                  long[][] r = new long[7][2];
+                  try {
+                      Cursor c = getReadableDatabase().rawQuery("SELECT cat,COUNT(*),SUM(size) FROM files WHERE isdir=0"
+                              + (hidden ? "" : " AND hidden=0") + " GROUP BY cat", null);
+                      try {
+                          while (c.moveToNext()) {
+                              int k = c.getInt(0);
+                              if (k >= 1 && k <= 6) {
+                                  r[k][0] = c.getLong(1);
+                                  r[k][1] = c.isNull(2) ? 0 : c.getLong(2);
+                              }
+                          }
+                      } finally {
+                          c.close();
+                      }
+                  } catch (Throwable ignored) {
+                  }
+                  r[0] = stats(BIG, hidden);
+                  return r;
+              }
+
+              /** Instantané en mémoire pour la recherche ; rechargé seulement si l'index a changé. */
+              SearchEngine.Snapshot snapshot() {
+                  synchronized (snapLock) {
+                      return loadSnapshot();
+                  }
+              }
+
+              private SearchEngine.Snapshot loadSnapshot() {
+                  long v = version.get();
+                  if (snap != null && snap.version == v) return snap;
+                  SearchEngine.Snapshot s = new SearchEngine.Snapshot();
+                  s.version = v;
+                  int cap = 4096, n = 0;
+                  s.name = new String[cap];
+                  s.norm = new String[cap];
+                  s.parent = new int[cap];
+                  s.size = new long[cap];
+                  s.mtime = new long[cap];
+                  s.flags = new byte[cap];
+                  ArrayList<String> dirs = new ArrayList<>();
+                  HashMap<String, Integer> map = new HashMap<>();
+                  try {
+                      Cursor c = getReadableDatabase().rawQuery("SELECT parent,name,size,mtime,isdir,hidden FROM files", null);
+                      try {
+                          String lastP = null;
+                          int lastD = 0;
+                          while (c.moveToNext()) {
+                              if (n == cap) {
+                                  cap *= 2;
+                                  s.name = Arrays.copyOf(s.name, cap);
+                                  s.norm = Arrays.copyOf(s.norm, cap);
+                                  s.parent = Arrays.copyOf(s.parent, cap);
+                                  s.size = Arrays.copyOf(s.size, cap);
+                                  s.mtime = Arrays.copyOf(s.mtime, cap);
+                                  s.flags = Arrays.copyOf(s.flags, cap);
+                              }
+                              String p = c.getString(0);
+                              if (!p.equals(lastP)) {
+                                  Integer d = map.get(p);
+                                  if (d == null) {
+                                      d = dirs.size();
+                                      dirs.add(p);
+                                      map.put(p, d);
+                                  }
+                                  lastP = p;
+                                  lastD = d;
+                              }
+                              String name = c.getString(1);
+                              s.parent[n] = lastD;
+                              s.name[n] = name;
+                              s.norm[n] = Norm.of(name);
+                              s.size[n] = c.getLong(2);
+                              s.mtime[n] = c.getLong(3);
+                              s.flags[n] = (byte) ((c.getInt(4) != 0 ? SearchEngine.F_DIR : 0)
+                                      | (c.getInt(5) != 0 ? SearchEngine.F_HIDDEN : 0));
+                              n++;
+                          }
+                      } finally {
+                          c.close();
+                      }
+                  } catch (Throwable ignored) {
+                  }
+                  s.n = n;
+                  s.dirs = dirs.toArray(new String[0]);
+                  snap = s;
+                  return s;
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/FilesProvider.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.content.ContentProvider;
+          import android.content.ContentValues;
+          import android.database.Cursor;
+          import android.database.MatrixCursor;
+          import android.net.Uri;
+          import android.os.ParcelFileDescriptor;
+          import android.provider.OpenableColumns;
+
+          import java.io.File;
+          import java.io.FileNotFoundException;
+
+          public class FilesProvider extends ContentProvider {
+
+              public static final String AUTH = "com.fichierspro.app.files";
+
+              public static Uri uriFor(File f) {
+                  return new Uri.Builder().scheme("content").authority(AUTH).path(f.getAbsolutePath()).build();
+              }
+
+              static File fileOf(Uri u) {
+                  return new File(u.getPath());
+              }
+
+              @Override
+              public boolean onCreate() {
+                  return true;
+              }
+
+              @Override
+              public String getType(Uri uri) {
+                  return MainActivity.mimeOf(fileOf(uri));
+              }
+
+              @Override
+              public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+                  File f = fileOf(uri);
+                  if (!f.isFile()) throw new FileNotFoundException(f.getPath());
+                  return ParcelFileDescriptor.open(f, ParcelFileDescriptor.parseMode(mode));
+              }
+
+              @Override
+              public Cursor query(Uri uri, String[] projection, String sel, String[] args, String sort) {
+                  File f = fileOf(uri);
+                  String[] cols = projection != null ? projection : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+                  MatrixCursor c = new MatrixCursor(cols, 1);
+                  Object[] row = new Object[cols.length];
+                  for (int i = 0; i < cols.length; i++) {
+                      if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) row[i] = f.getName();
+                      else if (OpenableColumns.SIZE.equals(cols[i])) row[i] = f.length();
+                  }
+                  c.addRow(row);
+                  return c;
+              }
+
+              @Override
+              public Uri insert(Uri uri, ContentValues v) {
+                  return null;
+              }
+
+              @Override
+              public int delete(Uri uri, String s, String[] a) {
+                  return 0;
+              }
+
+              @Override
+              public int update(Uri uri, ContentValues v, String s, String[] a) {
+                  return 0;
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/IFile.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import java.io.File;
+
+          /** Fichier dont le type, la taille et la date sont déjà connus (aucun accès disque à l'affichage). */
+          final class IFile extends File {
+              final boolean dir;
+              final long sz, mt;
+
+              IFile(String path, boolean dir, long sz, long mt) {
+                  super(path);
+                  this.dir = dir;
+                  this.sz = sz;
+                  this.mt = mt;
+              }
+
+              @Override
+              public boolean isDirectory() {
+                  return dir;
+              }
+
+              @Override
+              public boolean isFile() {
+                  return !dir;
+              }
+
+              @Override
+              public long length() {
+                  return sz;
+              }
+
+              @Override
+              public long lastModified() {
+                  return mt;
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/IndexWalker.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import java.io.File;
+          import java.nio.file.DirectoryStream;
+          import java.nio.file.Files;
+          import java.nio.file.LinkOption;
+          import java.nio.file.Path;
+          import java.nio.file.Paths;
+          import java.nio.file.attribute.BasicFileAttributes;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.Map;
+          import java.util.Set;
+          import java.util.concurrent.ConcurrentLinkedDeque;
+          import java.util.concurrent.LinkedBlockingQueue;
+          import java.util.concurrent.TimeUnit;
+          import java.util.concurrent.atomic.AtomicBoolean;
+          import java.util.concurrent.atomic.AtomicInteger;
+
+          /**
+           * Parcours parallèle et incrémental du stockage.
+           * Un dossier dont la date de modification n'a pas changé depuis le dernier passage
+           * n'est pas relu : on descend directement dans ses sous-dossiers connus.
+           */
+          final class IndexWalker {
+              private IndexWalker() {
+              }
+
+              static final class Entry {
+                  String name;
+                  long size, mtime;
+                  boolean dir;
+              }
+
+              static final class DirResult {
+                  String dir;
+                  long mtime;
+                  ArrayList<Entry> entries;
+              }
+
+              interface Sink {
+                  void onDir(DirResult r);
+              }
+
+              private static final class Task {
+                  final String dir;
+                  final long mtime;
+
+                  Task(String d, long m) {
+                      dir = d;
+                      mtime = m;
+                  }
+              }
+
+              static String join(String dir, String name) {
+                  return dir.endsWith("/") ? dir + name : dir + "/" + name;
+              }
+
+              /** Liste un dossier avec taille/date/type en un seul appel système par élément. */
+              static ArrayList<Entry> list(String dir) {
+                  ArrayList<Entry> out = new ArrayList<>();
+                  try (DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get(dir))) {
+                      for (Path p : ds) {
+                          try {
+                              BasicFileAttributes a = Files.readAttributes(p, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                              if (a.isSymbolicLink()) continue;
+                              boolean d = a.isDirectory();
+                              if (!d && !a.isRegularFile()) continue;
+                              Path fn = p.getFileName();
+                              if (fn == null) continue;
+                              Entry e = new Entry();
+                              e.name = fn.toString();
+                              e.dir = d;
+                              e.size = d ? 0 : a.size();
+                              e.mtime = a.lastModifiedTime().toMillis();
+                              out.add(e);
+                          } catch (Exception ignored) {
+                          }
+                      }
+                      return out;
+                  } catch (Throwable t) {
+                      return listLegacy(dir);
+                  }
+              }
+
+              private static ArrayList<Entry> listLegacy(String dir) {
+                  File[] fs = new File(dir).listFiles();
+                  if (fs == null) return null;
+                  ArrayList<Entry> out = new ArrayList<>(fs.length);
+                  for (File f : fs) {
+                      Entry e = new Entry();
+                      e.name = f.getName();
+                      e.dir = f.isDirectory();
+                      e.size = e.dir ? 0 : f.length();
+                      e.mtime = f.lastModified();
+                      out.add(e);
+                  }
+                  return out;
+              }
+
+              /**
+               * @param dirState  dossier -> date de modification lors de sa dernière lecture complète
+               * @param childDirs dossier -> sous-dossiers connus
+               * @param full      true = tout relire sans raccourci
+               * @param sink      appelé sur le fil appelant, un dossier relu à la fois
+               */
+              static void walk(List<String> roots, final Map<String, Long> dirState,
+                               final Map<String, ArrayList<String>> childDirs, final Set<String> excluded,
+                               final boolean full, int threads, Sink sink, final AtomicBoolean cancel) {
+                  final ConcurrentLinkedDeque<Task> queue = new ConcurrentLinkedDeque<>();
+                  final AtomicInteger pending = new AtomicInteger();
+                  final LinkedBlockingQueue<DirResult> out = new LinkedBlockingQueue<>(256);
+                  for (String r : roots) {
+                      File f = new File(r);
+                      if (!f.isDirectory()) continue;
+                      pending.incrementAndGet();
+                      queue.add(new Task(r, f.lastModified()));
+                  }
+                  Thread[] ws = new Thread[threads];
+                  for (int w = 0; w < threads; w++) {
+                      ws[w] = new Thread(new Runnable() {
+                          @Override
+                          public void run() {
+                              while (!cancel.get()) {
+                                  Task t = queue.pollLast();
+                                  if (t == null) {
+                                      if (pending.get() == 0) return;
+                                      try {
+                                          Thread.sleep(2);
+                                      } catch (InterruptedException e) {
+                                          return;
+                                      }
+                                      continue;
+                                  }
+                                  try {
+                                      Long known = full ? null : dirState.get(t.dir);
+                                      if (known != null && t.mtime > 0 && known == t.mtime) {
+                                          ArrayList<String> kids = childDirs.get(t.dir);
+                                          if (kids != null) {
+                                              for (String k : kids) {
+                                                  if (excluded.contains(k)) continue;
+                                                  long m = new File(k).lastModified();
+                                                  if (m == 0) continue;
+                                                  pending.incrementAndGet();
+                                                  queue.add(new Task(k, m));
+                                              }
+                                          }
+                                      } else {
+                                          DirResult r = new DirResult();
+                                          r.dir = t.dir;
+                                          r.mtime = t.mtime;
+                                          r.entries = list(t.dir);
+                                          if (r.entries != null) {
+                                              for (Entry e : r.entries) {
+                                                  if (!e.dir) continue;
+                                                  String c = join(t.dir, e.name);
+                                                  if (excluded.contains(c)) continue;
+                                                  pending.incrementAndGet();
+                                                  queue.add(new Task(c, e.mtime));
+                                              }
+                                              while (!cancel.get() && !out.offer(r, 100, TimeUnit.MILLISECONDS)) {
+                                              }
+                                          }
+                                      }
+                                  } catch (InterruptedException e) {
+                                      return;
+                                  } catch (Throwable ignored) {
+                                  } finally {
+                                      pending.decrementAndGet();
+                                  }
+                              }
+                          }
+                      }, "index-walk-" + w);
+                      ws[w].setPriority(Thread.NORM_PRIORITY - 1);
+                      ws[w].start();
+                  }
+                  try {
+                      while (true) {
+                          DirResult r = out.poll(20, TimeUnit.MILLISECONDS);
+                          if (r != null) {
+                              sink.onDir(r);
+                              continue;
+                          }
+                          boolean alive = false;
+                          for (Thread w : ws) if (w.isAlive()) alive = true;
+                          if (!alive && out.isEmpty()) break;
+                      }
+                  } catch (InterruptedException e) {
+                      cancel.set(true);
+                  }
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
           cat > app/src/main/java/com/fichierspro/app/MainActivity.java << 'FIN_DU_FICHIER'
           package com.fichierspro.app;
 
@@ -202,7 +1277,18 @@ jobs:
           import android.provider.MediaStore;
           import android.provider.Settings;
           import android.text.InputType;
+          import android.text.Editable;
+          import android.text.SpannableString;
+          import android.text.Spanned;
           import android.text.TextUtils;
+          import android.text.TextWatcher;
+          import android.text.style.ForegroundColorSpan;
+          import android.text.style.StyleSpan;
+          import android.os.SystemClock;
+          import android.view.inputmethod.EditorInfo;
+          import android.view.inputmethod.InputMethodManager;
+          import android.widget.AbsListView;
+          import java.util.concurrent.atomic.AtomicInteger;
           import android.util.LruCache;
           import android.util.TypedValue;
           import android.view.Gravity;
@@ -253,7 +1339,7 @@ jobs:
 
           public class MainActivity extends Activity {
 
-              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3;
+              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4;
 
               static final Set<String> IMG = set("jpg jpeg png gif bmp webp heic heif");
               static final Set<String> VID = set("mp4 mkv avi mov 3gp webm flv wmv m4v ts");
@@ -268,6 +1354,31 @@ jobs:
               File prevDir;
               String subText = "";
               String listTitle = "";
+
+              FileIndex index;
+              int listKind;
+              final Runnable indexListener = new Runnable() {
+                  @Override
+                  public void run() {
+                      onIndexChanged();
+                  }
+              };
+              TextView[] tileCounts;
+
+              EditText searchEdit;
+              LinearLayout titleCol;
+              ScrollView historyView;
+              File searchHome, searchScope;
+              String searchQuery = "", searchStatus = "";
+              long searchVer;
+              final AtomicInteger searchGen = new AtomicInteger();
+              final ExecutorService searchExec = Executors.newSingleThreadExecutor();
+              final Runnable searchRun = new Runnable() {
+                  @Override
+                  public void run() {
+                      runSearch();
+                  }
+              };
               final ArrayList<File> items = new ArrayList<>();
               final HashMap<String, Integer> childCount = new HashMap<>();
               final LinkedHashSet<File> selected = new LinkedHashSet<>();
@@ -322,6 +1433,7 @@ jobs:
                       showPermScreen();
                       return;
                   }
+                  ensureIndex();
                   String last = state != null ? state.getString("dir") : null;
                   if (last != null && new File(last).isDirectory()) browse(new File(last), null);
                   else showHome();
@@ -342,12 +1454,17 @@ jobs:
                   } else if (mode == M_BROWSE && selected.isEmpty()) {
                       loadDir(currentDir, listView.getFirstVisiblePosition(), null);
                   }
+                  if (index != null && hasPerm()) index.syncIfStale(30000);
               }
 
               @Override
               protected void onDestroy() {
                   super.onDestroy();
                   scanGen++;
+                  searchGen.incrementAndGet();
+                  ui.removeCallbacks(searchRun);
+                  if (index != null && index.listener == indexListener) index.listener = null;
+                  searchExec.shutdownNow();
                   bg.shutdownNow();
                   thumbExec.shutdownNow();
               }
@@ -366,7 +1483,8 @@ jobs:
                       else browse(parent, currentDir);
                       return;
                   }
-                  if (mode == M_LIST || mode == M_TRASH) {
+                  if (mode == M_LIST || mode == M_TRASH || mode == M_SEARCH) {
+                      hideKeyboard();
                       if (prevDir != null) {
                           File p = prevDir;
                           prevDir = null;
@@ -655,6 +1773,7 @@ jobs:
                   btnBack = iconBtn("←", v -> onBackPressed());
                   top.addView(btnBack);
                   LinearLayout tcol = new LinearLayout(this);
+                  titleCol = tcol;
                   tcol.setOrientation(LinearLayout.VERTICAL);
                   tcol.setPadding(dp(8), 0, 0, 0);
                   tvTitle = text("Fichiers Pro", 19, Color.WHITE, true);
@@ -666,6 +1785,47 @@ jobs:
                   tcol.addView(tvTitle);
                   tcol.addView(tvSub);
                   top.addView(tcol, new LinearLayout.LayoutParams(0, -2, 1));
+
+                  searchEdit = new EditText(this);
+                  searchEdit.setSingleLine(true);
+                  searchEdit.setHint("Rechercher un fichier…");
+                  searchEdit.setTextSize(16);
+                  searchEdit.setTextColor(cText);
+                  searchEdit.setHintTextColor(cSub);
+                  searchEdit.setBackground(round(cCard, 22));
+                  searchEdit.setPadding(dp(16), dp(8), dp(16), dp(8));
+                  searchEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                  searchEdit.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+                  searchEdit.setVisibility(View.GONE);
+                  searchEdit.addTextChangedListener(new TextWatcher() {
+                      @Override
+                      public void beforeTextChanged(CharSequence c, int a, int b, int d) {
+                      }
+
+                      @Override
+                      public void onTextChanged(CharSequence c, int a, int b, int d) {
+                      }
+
+                      @Override
+                      public void afterTextChanged(Editable e) {
+                          if (mode != M_SEARCH) return;
+                          ui.removeCallbacks(searchRun);
+                          ui.postDelayed(searchRun, 140);
+                      }
+                  });
+                  searchEdit.setOnEditorActionListener((v, id, ev) -> {
+                      addHistory(searchEdit.getText().toString().trim());
+                      hideKeyboard();
+                      return true;
+                  });
+                  LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, -2, 1);
+                  slp.setMargins(dp(6), 0, dp(4), 0);
+                  top.addView(searchEdit, slp);
+
+                  historyView = new ScrollView(this);
+                  LinearLayout hbox = new LinearLayout(this);
+                  hbox.setOrientation(LinearLayout.VERTICAL);
+                  historyView.addView(hbox);
                   topActions = new LinearLayout(this);
                   topActions.setOrientation(LinearLayout.HORIZONTAL);
                   top.addView(topActions);
@@ -701,6 +1861,16 @@ jobs:
                   listView.setClipToPadding(false);
                   adapter = new FileAdapter();
                   listView.setAdapter(adapter);
+                  listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+                      @Override
+                      public void onScrollStateChanged(AbsListView v, int st) {
+                          if (st == SCROLL_STATE_TOUCH_SCROLL && mode == M_SEARCH) hideKeyboard();
+                      }
+
+                      @Override
+                      public void onScroll(AbsListView v, int a, int b, int c) {
+                      }
+                  });
                   listView.setOnItemClickListener((p, v, pos, id) -> {
                       if (pos < items.size()) onItemClick(items.get(pos));
                   });
@@ -747,13 +1917,18 @@ jobs:
 
               void updateEmpty() {
                   boolean show = items.isEmpty() && loading.getVisibility() != View.VISIBLE;
+                  if (mode == M_SEARCH && searchQuery.isEmpty()) show = false;
                   emptyView.setText(mode == M_TRASH ? "🗑\n\nLa corbeille est vide"
-                          : mode == M_LIST ? "🔎\n\nAucun résultat" : "📂\n\nDossier vide");
+                          : mode == M_SEARCH ? "🔎\n\nAucun résultat"
+                          : mode == M_LIST ? "📂\n\nAucun fichier dans cette catégorie" : "📂\n\nDossier vide");
                   emptyView.setVisibility(show ? View.VISIBLE : View.GONE);
               }
 
               void updateHeader() {
                   topActions.removeAllViews();
+                  boolean bar = mode == M_SEARCH && selected.isEmpty();
+                  searchEdit.setVisibility(bar ? View.VISIBLE : View.GONE);
+                  titleCol.setVisibility(bar ? View.GONE : View.VISIBLE);
                   if (!selected.isEmpty()) {
                       btnBack.setVisibility(View.VISIBLE);
                       btnBack.setText("✕");
@@ -776,7 +1951,8 @@ jobs:
                               tvTitle.setText(listTitle);
                               tvSub.setText(subText);
                       }
-                      if (mode != M_TRASH && mode != M_PERM) topActions.addView(iconBtn("🔍", v -> askSearch()));
+                      if (mode == M_SEARCH) topActions.addView(iconBtn("✕", v -> searchEdit.setText("")));
+                      else if (mode != M_TRASH && mode != M_PERM) topActions.addView(iconBtn("🔍", v -> openSearch()));
                       if (mode != M_PERM) topActions.addView(iconBtn("⋮", this::mainMenu));
                   }
                   updateBottom();
@@ -827,6 +2003,7 @@ jobs:
               // ---------------------------------------------------------------- accueil
 
               void showHome() {
+                  ensureIndex();
                   mode = M_HOME;
                   scanGen++;
                   selected.clear();
@@ -847,10 +2024,11 @@ jobs:
 
                   col.addView(section("Catégories"));
                   Object[][] tiles = {
-                          {"🖼", "Images", 0xFF43A047, IMG}, {"🎬", "Vidéos", 0xFFE53935, VID}, {"🎵", "Audio", 0xFF8E24AA, AUD},
-                          {"📄", "Documents", 0xFF1E88E5, DOC}, {"🤖", "APK", 0xFF7CB342, APK}, {"🗜", "Archives", 0xFF6D4C41, ARC},
+                          {"🖼", "Images", 0xFF43A047, 1}, {"🎬", "Vidéos", 0xFFE53935, 2}, {"🎵", "Audio", 0xFF8E24AA, 3},
+                          {"📄", "Documents", 0xFF1E88E5, 4}, {"🤖", "APK", 0xFF7CB342, 5}, {"🗜", "Archives", 0xFF6D4C41, 6},
                           {"⬇", "Téléchargements", 0xFF00897B, "dl"}, {"📊", "Gros fichiers", 0xFFF4511E, "big"}, {"🗑", "Corbeille", 0xFF546E7A, "trash"}};
                   LinearLayout row = null;
+                  tileCounts = new TextView[tiles.length];
                   for (int i = 0; i < tiles.length; i++) {
                       if (i % 3 == 0) {
                           row = new LinearLayout(this);
@@ -875,6 +2053,11 @@ jobs:
                       lb.setSingleLine(true);
                       lb.setEllipsize(TextUtils.TruncateAt.END);
                       tile.addView(lb);
+                      TextView ct = text(" ", 10, cSub, false);
+                      ct.setGravity(Gravity.CENTER);
+                      ct.setSingleLine(true);
+                      tile.addView(ct);
+                      tileCounts[i] = ct;
                       tile.setOnClickListener(v -> openTile(t));
                       LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
                       lp.setMargins(dp(4), dp(4), dp(4), dp(4));
@@ -921,6 +2104,7 @@ jobs:
 
                   content.removeAllViews();
                   content.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+                  updateTileStats();
               }
 
               GradientDrawable roundOval(int color) {
@@ -1005,20 +2189,18 @@ jobs:
                   return c;
               }
 
-              @SuppressWarnings("unchecked")
               void openTile(Object[] t) {
                   Object k = t[3];
                   String title = (String) t[1];
                   prevDir = null;
-                  if (k instanceof Set) {
-                      final Set<String> exts = (Set<String>) k;
-                      runScan(title, storageRoots(), f -> f.isFile() && exts.contains(ext(f)), 2, false, 0);
+                  if (k instanceof Integer) {
+                      showCategory(title, (Integer) k);
                   } else if ("dl".equals(k)) {
                       File d = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                       if (!d.exists()) d.mkdirs();
                       browse(d, null);
                   } else if ("big".equals(k)) {
-                      runScan("Gros fichiers (> 10 Mo)", storageRoots(), f -> f.isFile() && f.length() > 10L * 1024 * 1024, 1, false, 300);
+                      showCategory("Gros fichiers (> 10 Mo)", FileIndex.BIG);
                   } else {
                       showTrash();
                   }
@@ -1069,36 +2251,58 @@ jobs:
                   final int key = prefs.getInt("sort", 0);
                   final boolean asc = prefs.getBoolean("asc", true);
                   if (keepPos < 0) loading.setVisibility(View.VISIBLE);
+                  final boolean fast = !rootOf(dir).getPath().equals("/");
+                  final String dpath = dir.getAbsolutePath();
                   bg.execute(() -> {
-                      File[] fs = dir.listFiles();
                       final ArrayList<File> res = new ArrayList<>();
-                      final HashMap<String, Integer> cnt = new HashMap<>();
-                      if (fs != null) {
-                          for (File f : fs) {
-                              if (!hidden && f.getName().startsWith(".")) continue;
-                              res.add(f);
-                              if (f.isDirectory()) {
-                                  String[] c = f.list();
-                                  cnt.put(f.getAbsolutePath(), c == null ? -1 : c.length);
+                      boolean ok = false;
+                      if (fast) {
+                          ArrayList<IndexWalker.Entry> es = IndexWalker.list(dpath);
+                          if (es != null) {
+                              ok = true;
+                              for (IndexWalker.Entry e : es) {
+                                  if (!hidden && e.name.startsWith(".")) continue;
+                                  res.add(new IFile(IndexWalker.join(dpath, e.name), e.dir, e.size, e.mtime));
+                              }
+                          }
+                      } else {
+                          File[] fs = dir.listFiles();
+                          if (fs != null) {
+                              ok = true;
+                              for (File f : fs) {
+                                  if (!hidden && f.getName().startsWith(".")) continue;
+                                  res.add(new IFile(f.getPath(), f.isDirectory(), f.length(), f.lastModified()));
                               }
                           }
                       }
                       sortFiles(res, key, asc);
-                      final boolean denied = fs == null;
+                      final boolean denied = !ok;
                       ui.post(() -> {
                           if (gen != scanGen || mode != M_BROWSE) return;
                           items.clear();
                           items.addAll(res);
-                          childCount.clear();
-                          childCount.putAll(cnt);
+                          if (keepPos < 0) childCount.clear();
                           loading.setVisibility(View.GONE);
                           adapter.notifyDataSetChanged();
                           if (keepPos >= 0) listView.setSelection(Math.min(keepPos, Math.max(0, items.size() - 1)));
                           else if (focus != null) listView.setSelection(Math.max(0, items.indexOf(focus) - 2));
                           else listView.setSelection(0);
-                          subText = res.size() + " élément(s)" + (denied ? " — accès refusé" : "") + "  •  " + dir.getAbsolutePath();
+                          subText = res.size() + " élément(s)" + (denied ? " — accès refusé" : "") + "  •  " + dpath;
                           updateHeader();
                           updateEmpty();
+                      });
+                      final HashMap<String, Integer> cnt = new HashMap<>();
+                      for (File f : res) {
+                          if (gen != scanGen) return;
+                          if (!f.isDirectory()) continue;
+                          String[] c = f.list();
+                          cnt.put(f.getAbsolutePath(), c == null ? -1 : c.length);
+                      }
+                      ui.post(() -> {
+                          if (gen != scanGen || mode != M_BROWSE) return;
+                          childCount.clear();
+                          childCount.putAll(cnt);
+                          adapter.notifyDataSetChanged();
                       });
                   });
               }
@@ -1132,80 +2336,274 @@ jobs:
                   });
               }
 
-              interface FileTest {
-                  boolean ok(File f);
+              // ---------------------------------------------------------------- index : catégories instantanées
+
+              void ensureIndex() {
+                  if (index != null) return;
+                  index = FileIndex.get(this);
+                  index.listener = indexListener;
+                  index.requestSync(false);
               }
 
-              void runScan(String title, final List<File> bases, final FileTest test, final int sortKey, final boolean asc, final int limit) {
-                  mode = M_LIST;
-                  selected.clear();
-                  subText = "Analyse en cours…";
-                  showListUi(title, false, false);
-                  final int gen = ++scanGen;
+              void onIndexChanged() {
+                  if (isFinishing() || index == null) return;
+                  if (mode == M_HOME) {
+                      updateTileStats();
+                  } else if (mode == M_LIST) {
+                      if (selected.isEmpty()) loadList(true);
+                  } else if (mode == M_SEARCH) {
+                      if (selected.isEmpty() && !searchQuery.isEmpty() && index.version.get() != searchVer
+                              && (!index.syncing || items.isEmpty())) runSearch();
+                  }
+              }
+
+              static String fmtCount(long n) {
+                  return String.format(Locale.FRANCE, "%,d", n);
+              }
+
+              int hi() {
+                  return dark ? 0xFF90CAF9 : cPrimary;
+              }
+
+              void updateTileStats() {
+                  if (index == null || tileCounts == null) return;
+                  final TextView[] tc = tileCounts;
                   final boolean hidden = showHidden();
-                  final File trash = trashDir();
                   bg.execute(() -> {
-                      ArrayList<File> res = new ArrayList<>();
-                      ArrayDeque<File> st = new ArrayDeque<>();
-                      for (File b : bases) st.push(b);
-                      int seen = 0;
-                      while (!st.isEmpty()) {
-                          if (gen != scanGen) return;
-                          File d = st.pop();
-                          File[] fs = d.listFiles();
-                          if (fs == null) continue;
-                          for (File f : fs) {
-                              String nm = f.getName();
-                              if (!hidden && nm.startsWith(".")) continue;
-                              if (f.isDirectory()) {
-                                  if (f.equals(trash)) continue;
-                                  st.push(f);
-                              }
-                              if (test.ok(f)) {
-                                  res.add(f);
-                                  if (res.size() >= 20000) {
-                                      st.clear();
-                                      break;
-                                  }
-                              }
-                          }
-                          if (++seen % 200 == 0) {
-                              final int n = res.size();
-                              ui.post(() -> {
-                                  if (gen == scanGen && mode == M_LIST) {
-                                      subText = "Analyse… " + n + " trouvé(s)";
-                                      updateHeader();
-                                  }
-                              });
-                          }
-                      }
-                      sortFiles(res, sortKey, asc);
-                      final List<File> out = (limit > 0 && res.size() > limit) ? new ArrayList<>(res.subList(0, limit)) : res;
-                      if (sortKey == 1 && !asc) Collections.sort(out, (a, b) -> Long.compare(b.length(), a.length()));
-                      long tot = 0;
-                      for (File f : out) tot += sizeOfFile(f);
-                      final long ftot = tot;
+                      final long[][] st = index.allStats(hidden);
                       ui.post(() -> {
-                          if (gen != scanGen) return;
-                          items.clear();
-                          items.addAll(out);
-                          loading.setVisibility(View.GONE);
-                          adapter.notifyDataSetChanged();
-                          subText = out.size() + " élément(s)  •  " + fmtSize(ftot);
-                          updateHeader();
-                          updateEmpty();
+                          if (mode != M_HOME || tc != tileCounts) return;
+                          for (int i = 0; i < 6; i++) tc[i].setText(tileText(st[i + 1]));
+                          tc[7].setText(tileText(st[0]));
                       });
                   });
               }
 
-              void askSearch() {
-                  final File base = mode == M_BROWSE ? currentDir : null;
-                  inputDialog(base != null ? "Rechercher dans « " + displayName(base) + " »" : "Rechercher partout", "", false, q -> {
-                      final String ql = q.toLowerCase(Locale.ROOT);
-                      prevDir = base;
-                      List<File> bases = base != null ? Collections.singletonList(base) : storageRoots();
-                      runScan("« " + q + " »", bases, f -> f.getName().toLowerCase(Locale.ROOT).contains(ql), 0, true, 5000);
+              String tileText(long[] st) {
+                  if (st[0] == 0) return index.syncing ? "…" : "0";
+                  return fmtCount(st[0]) + " • " + fmtSize(st[1]);
+              }
+
+              void showCategory(String title, int kind) {
+                  ensureIndex();
+                  mode = M_LIST;
+                  listKind = kind;
+                  selected.clear();
+                  subText = "";
+                  showListUi(title, false, false);
+                  loadList(false);
+              }
+
+              /**
+               * Lit la catégorie dans l'index : la première page s'affiche tout de suite,
+               * le reste est ajouté juste après. keepPos = rechargement discret (position conservée).
+               */
+              void loadList(final boolean keepPos) {
+                  final int gen = ++scanGen;
+                  final int kind = listKind;
+                  final boolean hidden = showHidden();
+                  final int pos = listView.getFirstVisiblePosition();
+                  View v0 = listView.getChildAt(0);
+                  final int top = v0 == null ? 0 : v0.getTop() - listView.getPaddingTop();
+                  final int cap = kind == FileIndex.BIG ? 500 : -1;
+                  bg.execute(() -> {
+                      final ArrayList<IFile> first = index.list(kind, hidden, keepPos ? cap : 300, 0);
+                      final long[] st = index.stats(kind, hidden);
+                      ui.post(() -> {
+                          if (gen != scanGen || mode != M_LIST) return;
+                          if (keepPos && !selected.isEmpty()) return;
+                          items.clear();
+                          items.addAll(first);
+                          boolean wait = items.isEmpty() && index.syncing;
+                          loading.setVisibility(wait ? View.VISIBLE : View.GONE);
+                          adapter.notifyDataSetChanged();
+                          if (keepPos) listView.setSelectionFromTop(Math.min(pos, Math.max(0, items.size() - 1)), top);
+                          else listView.setSelection(0);
+                          if (wait) subText = "Indexation en cours…";
+                          else subText = (kind == FileIndex.BIG && st[0] > 500 ? "500 plus gros sur " + fmtCount(st[0])
+                                  : fmtCount(st[0]) + " élément(s)") + "  •  " + fmtSize(st[1])
+                                  + (index.syncing ? "  •  mise à jour…" : "");
+                          updateHeader();
+                          updateEmpty();
+                      });
+                      if (!keepPos && first.size() == 300) {
+                          final ArrayList<IFile> rest = index.list(kind, hidden, kind == FileIndex.BIG ? 200 : -1, 300);
+                          ui.post(() -> {
+                              if (gen != scanGen || mode != M_LIST || rest.isEmpty()) return;
+                              items.addAll(rest);
+                              adapter.notifyDataSetChanged();
+                          });
+                      }
                   });
+              }
+
+              // ---------------------------------------------------------------- recherche en temps réel
+
+              void hideKeyboard() {
+                  InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                  if (im != null && searchEdit != null) im.hideSoftInputFromWindow(searchEdit.getWindowToken(), 0);
+              }
+
+              List<String> searchHistory() {
+                  ArrayList<String> out = new ArrayList<>();
+                  for (String x : prefs.getString("sh", "").split("\n")) if (!x.isEmpty()) out.add(x);
+                  return out;
+              }
+
+              void addHistory(String q) {
+                  if (q == null || q.trim().isEmpty()) return;
+                  q = q.trim();
+                  List<String> h = searchHistory();
+                  Iterator<String> it = h.iterator();
+                  while (it.hasNext()) if (it.next().equalsIgnoreCase(q)) it.remove();
+                  h.add(0, q);
+                  while (h.size() > 8) h.remove(h.size() - 1);
+                  prefs.edit().putString("sh", TextUtils.join("\n", h)).apply();
+              }
+
+              void openSearch() {
+                  ensureIndex();
+                  searchHome = mode == M_BROWSE ? currentDir : null;
+                  searchScope = searchHome;
+                  prevDir = searchHome;
+                  mode = M_SEARCH;
+                  selected.clear();
+                  scanGen++;
+                  searchQuery = "";
+                  searchStatus = "";
+                  showListUi("Recherche", true, false);
+                  loading.setVisibility(View.GONE);
+                  content.addView(historyView, new FrameLayout.LayoutParams(-1, -1));
+                  searchEdit.setText("");
+                  buildSearchStatus();
+                  showHistory();
+                  searchEdit.requestFocus();
+                  searchEdit.post(() -> {
+                      InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                      if (im != null && mode == M_SEARCH) im.showSoftInput(searchEdit, InputMethodManager.SHOW_IMPLICIT);
+                  });
+                  final FileIndex ix = index;
+                  searchExec.execute(ix::snapshot);
+              }
+
+              void buildSearchStatus() {
+                  crumbs.removeAllViews();
+                  if (searchHome != null) {
+                      String where = searchScope == null ? "🌐 Partout"
+                              : "📁 " + (searchHome.equals(internalRoot()) ? "Stockage interne" : searchHome.getName());
+                      TextView chip = text(where + "  ⇄", 12, hi(), true);
+                      chip.setPadding(dp(12), dp(5), dp(12), dp(5));
+                      chip.setBackground(round(soft(cPrimary), 14));
+                      chip.setOnClickListener(v -> {
+                          searchScope = searchScope == null ? searchHome : null;
+                          buildSearchStatus();
+                          runSearch();
+                      });
+                      crumbs.addView(chip);
+                  }
+                  TextView st = text(searchStatus.isEmpty() ? "Résultats pendant la saisie" : searchStatus, 12, cSub, false);
+                  st.setPadding(dp(8), dp(6), dp(8), dp(6));
+                  crumbs.addView(st);
+              }
+
+              void showHistory() {
+                  LinearLayout box = (LinearLayout) historyView.getChildAt(0);
+                  box.removeAllViews();
+                  List<String> h = searchHistory();
+                  TextView tip = text(h.isEmpty()
+                          ? "Tapez pour chercher : les résultats s'affichent pendant la saisie.\n\n"
+                          + "Majuscules et accents sont ignorés (« daved » trouve « Davèd »), "
+                          + "et les petites fautes de frappe sont tolérées."
+                          : "Recherches récentes", h.isEmpty() ? 14 : 13, cSub, !h.isEmpty());
+                  tip.setPadding(dp(18), dp(18), dp(18), dp(8));
+                  box.addView(tip);
+                  for (final String q : h) {
+                      TextView r = text("🕘   " + q, 15, cText, false);
+                      r.setSingleLine(true);
+                      r.setEllipsize(TextUtils.TruncateAt.END);
+                      r.setPadding(dp(18), dp(13), dp(18), dp(13));
+                      r.setBackground(ripple(false));
+                      r.setOnClickListener(v -> {
+                          searchEdit.setText(q);
+                          searchEdit.setSelection(searchEdit.getText().length());
+                      });
+                      box.addView(r);
+                  }
+                  if (!h.isEmpty()) {
+                      TextView clr = text("Effacer l'historique", 13, hi(), true);
+                      clr.setPadding(dp(18), dp(14), dp(18), dp(14));
+                      clr.setBackground(ripple(false));
+                      clr.setOnClickListener(v -> {
+                          prefs.edit().remove("sh").apply();
+                          showHistory();
+                      });
+                      box.addView(clr);
+                  }
+                  historyView.setVisibility(View.VISIBLE);
+              }
+
+              void runSearch() {
+                  if (mode != M_SEARCH || index == null) return;
+                  final String q = searchEdit.getText().toString().trim();
+                  searchQuery = q;
+                  final int g = searchGen.incrementAndGet();
+                  if (q.isEmpty()) {
+                      items.clear();
+                      adapter.notifyDataSetChanged();
+                      searchStatus = "";
+                      buildSearchStatus();
+                      emptyView.setVisibility(View.GONE);
+                      showHistory();
+                      return;
+                  }
+                  historyView.setVisibility(View.GONE);
+                  final String scope = searchScope == null ? null : searchScope.getAbsolutePath();
+                  final boolean hidden = showHidden();
+                  final FileIndex ix = index;
+                  searchExec.execute(() -> {
+                      if (searchGen.get() != g) return;
+                      long t0 = SystemClock.uptimeMillis();
+                      SearchEngine.Snapshot sn = ix.snapshot();
+                      SearchEngine.Result r = SearchEngine.search(sn, q, scope, hidden, 300, false, searchGen, g);
+                      if (r == null) return;
+                      if (r.total > 0) publishSearch(sn, r, g, t0);
+                      if (r.total < 25) {
+                          SearchEngine.Result r2 = SearchEngine.search(sn, q, scope, hidden, 300, true, searchGen, g);
+                          if (r2 == null) return;
+                          if (r2.total > r.total || r.total == 0) publishSearch(sn, r2, g, t0);
+                      }
+                  });
+              }
+
+              void publishSearch(SearchEngine.Snapshot sn, final SearchEngine.Result r, final int g, long t0) {
+                  final ArrayList<File> list = new ArrayList<>(r.idx.length);
+                  for (int i : r.idx)
+                      list.add(new IFile(sn.path(i), (sn.flags[i] & SearchEngine.F_DIR) != 0, sn.size[i], sn.mtime[i]));
+                  final long ms = SystemClock.uptimeMillis() - t0;
+                  final long ver = sn.version;
+                  ui.post(() -> {
+                      if (searchGen.get() != g || mode != M_SEARCH || !selected.isEmpty()) return;
+                      searchVer = ver;
+                      items.clear();
+                      items.addAll(list);
+                      adapter.notifyDataSetChanged();
+                      listView.setSelection(0);
+                      searchStatus = fmtCount(r.total) + " résultat(s)"
+                              + (r.total > r.idx.length ? " — " + r.idx.length + " meilleurs affichés" : "")
+                              + (r.fuzzy ? "  •  approchants inclus" : "") + "  •  " + ms + " ms";
+                      buildSearchStatus();
+                      updateEmpty();
+                  });
+              }
+
+              CharSequence highlighted(String name) {
+                  if (searchQuery.isEmpty()) return name;
+                  int[] h = SearchEngine.highlight(name, searchQuery);
+                  if (h == null) return name;
+                  SpannableString sp = new SpannableString(name);
+                  sp.setSpan(new ForegroundColorSpan(hi()), h[0], h[1], Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  sp.setSpan(new StyleSpan(Typeface.BOLD), h[0], h[1], Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  return sp;
               }
 
               void showTrash() {
@@ -1244,8 +2642,7 @@ jobs:
                           showTrash();
                           break;
                       case M_LIST:
-                          Iterator<File> it = items.iterator();
-                          while (it.hasNext()) if (!it.next().exists()) it.remove();
+                      case M_SEARCH:
                           adapter.notifyDataSetChanged();
                           updateHeader();
                           updateEmpty();
@@ -1266,6 +2663,10 @@ jobs:
                   if (mode == M_TRASH) {
                       trashItemDialog(f);
                       return;
+                  }
+                  if (mode == M_SEARCH) {
+                      addHistory(searchQuery);
+                      hideKeyboard();
                   }
                   if (f.isDirectory()) {
                       browse(f, null);
@@ -1350,9 +2751,10 @@ jobs:
                       m.add(0, 7, 6, "ℹ  Propriétés du dossier");
                       m.add(0, 8, 7, "🏠  Accueil");
                   }
-                  if (mode == M_LIST) {
+                  if (mode == M_LIST || mode == M_SEARCH) {
                       m.add(0, 5, 0, "☑  Tout sélectionner");
-                      m.add(0, 8, 1, "🏠  Accueil");
+                      m.add(0, 40, 1, "🔄  Actualiser l'index");
+                      m.add(0, 8, 2, "🏠  Accueil");
                   }
                   if (mode == M_TRASH) {
                       m.add(0, 20, 0, "♻  Tout restaurer");
@@ -1360,7 +2762,8 @@ jobs:
                   }
                   if (mode == M_HOME) {
                       m.add(0, 30, 0, "🗂  Explorer la racine ( / )");
-                      m.add(0, 31, 1, "ℹ  À propos");
+                      m.add(0, 40, 1, "🔄  Réindexer le stockage");
+                      m.add(0, 31, 2, "ℹ  À propos");
                   }
                   m.add(1, 10, 20, "Afficher les fichiers cachés").setCheckable(true).setChecked(showHidden());
                   m.add(1, 11, 21, "Thème sombre").setCheckable(true).setChecked(dark);
@@ -1406,7 +2809,15 @@ jobs:
                               break;
                           case 10:
                               prefs.edit().putBoolean("hidden", !showHidden()).apply();
-                              refresh();
+                              if (mode == M_LIST) loadList(false);
+                              else if (mode == M_SEARCH) runSearch();
+                              else refresh();
+                              break;
+                          case 40:
+                              if (index != null) {
+                                  index.requestSync(true);
+                                  toast("Mise à jour de l'index en arrière-plan…");
+                              }
                               break;
                           case 11:
                               prefs.edit().putBoolean("dark", !dark).apply();
@@ -1422,9 +2833,9 @@ jobs:
                               browse(new File("/"), null);
                               break;
                           case 31:
-                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 1.0")
+                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.0")
                                       .setMessage("Gestionnaire de fichiers complet :\n\n• Explorer, copier, couper, coller\n• Corbeille avec restauration\n"
-                                              + "• Compression et extraction ZIP\n• Recherche dans tout le téléphone\n• Catégories et gros fichiers\n"
+                                              + "• Compression et extraction ZIP\n• Recherche instantanée, sans accents ni majuscules\n• Catégories et gros fichiers indexés\n"
                                               + "• Miniatures photos et vidéos\n• Éditeur de texte intégré\n• Favoris, récents, MD5, thème sombre")
                                       .setPositiveButton("OK", null).show();
                               break;
@@ -1479,7 +2890,7 @@ jobs:
                       m.add(0, 5, 4, fav ? "⭐  Retirer des favoris" : "⭐  Ajouter aux favoris");
                       m.add(0, 6, 5, "🔗  Copier le chemin");
                   }
-                  if (mode == M_LIST && one != null) m.add(0, 8, 6, "📁  Afficher dans le dossier");
+                  if ((mode == M_LIST || mode == M_SEARCH) && one != null) m.add(0, 8, 6, "📁  Afficher dans le dossier");
                   m.add(0, 7, 7, "ℹ  Propriétés");
                   pm.setOnMenuItemClickListener(it -> {
                       switch (it.getItemId()) {
@@ -1626,9 +3037,15 @@ jobs:
                           else if (op.errors > 0) toast(op.errors + " erreur(s) pendant l'opération");
                           else if (op.msg != null) toast(op.msg);
                           if (after != null) after.done(op);
+                          if (mode == M_LIST || mode == M_SEARCH) {
+                              HashSet<File> gone = new HashSet<>();
+                              for (File f : selected) if (!f.exists()) gone.add(f);
+                              if (!gone.isEmpty()) items.removeAll(gone);
+                          }
                           selected.clear();
                           refresh();
                           updateHeader();
+                          if (index != null) index.requestSync(false);
                       });
                   });
               }
@@ -1861,11 +3278,12 @@ jobs:
                           selected.clear();
                           refresh();
                           updateHeader();
-                          if (mode == M_LIST) {
+                          if (mode == M_LIST || mode == M_SEARCH) {
                               int i = items.indexOf(f);
-                              if (i >= 0) items.set(i, d);
+                              if (i >= 0) items.set(i, new IFile(d.getPath(), f.isDirectory(), f.length(), f.lastModified()));
                               adapter.notifyDataSetChanged();
                           }
+                          if (index != null) index.requestSync(false);
                       } else toast("Impossible de renommer");
                   });
               }
@@ -2251,7 +3669,7 @@ jobs:
                       File f = items.get(pos);
                       String key = f.getAbsolutePath();
                       boolean dir = f.isDirectory();
-                      h.name.setText(displayName(f));
+                      h.name.setText(mode == M_SEARCH ? highlighted(displayName(f)) : displayName(f));
                       h.name.setAlpha(f.getName().startsWith(".") && mode != M_TRASH ? 0.6f : 1f);
                       String det;
                       if (dir) {
@@ -2259,7 +3677,7 @@ jobs:
                           det = (n == null || n < 0) ? "Dossier" : n + " élément(s)";
                       } else det = fmtSize(f.length());
                       h.details.setText(det + "   •   " + fmtDate(f.lastModified()));
-                      if (mode == M_LIST) {
+                      if (mode == M_LIST || mode == M_SEARCH) {
                           h.path.setVisibility(View.VISIBLE);
                           h.path.setText(f.getParent());
                       } else h.path.setVisibility(View.GONE);
@@ -2294,271 +3712,307 @@ jobs:
           }
           FIN_DU_FICHIER
           mkdir -p app/src/main/java/com/fichierspro/app
-          cat > app/src/main/java/com/fichierspro/app/EditorActivity.java << 'FIN_DU_FICHIER'
+          cat > app/src/main/java/com/fichierspro/app/Norm.java << 'FIN_DU_FICHIER'
           package com.fichierspro.app;
 
-          import android.app.Activity;
-          import android.app.AlertDialog;
-          import android.graphics.Color;
-          import android.graphics.Typeface;
-          import android.os.Bundle;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.text.Editable;
-          import android.text.InputType;
-          import android.text.TextUtils;
-          import android.text.TextWatcher;
-          import android.util.TypedValue;
-          import android.view.Gravity;
-          import android.widget.EditText;
-          import android.widget.LinearLayout;
-          import android.widget.TextView;
-          import android.widget.Toast;
+          import java.text.Normalizer;
+          import java.util.Locale;
 
-          import java.io.ByteArrayOutputStream;
-          import java.io.File;
-          import java.io.FileInputStream;
-          import java.io.FileOutputStream;
-          import java.io.InputStream;
-          import java.io.OutputStream;
-          import java.nio.charset.StandardCharsets;
-
-          public class EditorActivity extends Activity {
-
-              File file;
-              EditText et;
-              TextView title;
-              boolean dirty, loaded;
-              final Handler ui = new Handler(Looper.getMainLooper());
-
-              int dp(float v) {
-                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+          /** Normalisation pour la recherche : minuscules, sans accents (é è ê à â ç … -> e e e a a c). */
+          final class Norm {
+              private Norm() {
               }
 
-              @Override
-              protected void onCreate(Bundle state) {
-                  boolean dark = getSharedPreferences("fp", MODE_PRIVATE).getBoolean("dark", false);
-                  setTheme(dark ? R.style.AppDark : R.style.AppTheme);
-                  super.onCreate(state);
-                  int bg = dark ? 0xFF121417 : 0xFFFFFFFF;
-                  int fg = dark ? 0xFFECEFF1 : 0xFF1A1F24;
-                  int primary = dark ? 0xFF1E88E5 : 0xFF1565C0;
-                  getWindow().setStatusBarColor(MainActivity.darker(primary));
-                  String path = getIntent().getStringExtra("path");
-                  if (path == null) {
-                      finish();
-                      return;
+              static String of(String s) {
+                  int n = s.length();
+                  boolean lower = true;
+                  int i = 0;
+                  for (; i < n; i++) {
+                      char c = s.charAt(i);
+                      if (c >= 128) break;
+                      if (c >= 'A' && c <= 'Z') lower = false;
                   }
-                  file = new File(path);
-
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setBackgroundColor(bg);
-                  LinearLayout top = new LinearLayout(this);
-                  top.setGravity(Gravity.CENTER_VERTICAL);
-                  top.setBackgroundColor(primary);
-                  top.setPadding(dp(4), dp(8), dp(4), dp(8));
-                  top.setElevation(dp(4));
-                  top.addView(btn("←", () -> onBackPressed()));
-                  title = new TextView(this);
-                  title.setText(file.getName());
-                  title.setTextColor(Color.WHITE);
-                  title.setTextSize(18);
-                  title.setTypeface(Typeface.DEFAULT_BOLD);
-                  title.setSingleLine(true);
-                  title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-                  title.setPadding(dp(8), 0, dp(8), 0);
-                  top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-                  top.addView(btn("A−", () -> zoom(-1)));
-                  top.addView(btn("A+", () -> zoom(1)));
-                  top.addView(btn("💾", this::save));
-                  root.addView(top, new LinearLayout.LayoutParams(-1, -2));
-
-                  et = new EditText(this);
-                  et.setGravity(Gravity.TOP | Gravity.START);
-                  et.setTypeface(Typeface.MONOSPACE);
-                  et.setTextSize(TypedValue.COMPLEX_UNIT_SP, getSharedPreferences("fp", MODE_PRIVATE).getFloat("edsize", 14));
-                  et.setTextColor(fg);
-                  et.setBackgroundColor(bg);
-                  et.setPadding(dp(12), dp(12), dp(12), dp(12));
-                  et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-                  et.setHint("Chargement…");
-                  root.addView(et, new LinearLayout.LayoutParams(-1, 0, 1));
-                  setContentView(root);
-
-                  new Thread(() -> {
-                      String txt;
-                      try (InputStream in = new FileInputStream(file)) {
-                          ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                          byte[] buf = new byte[65536];
-                          int n;
-                          while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
-                          txt = new String(bo.toByteArray(), StandardCharsets.UTF_8);
-                      } catch (Exception e) {
-                          txt = null;
+                  if (i == n) return lower ? s : s.toLowerCase(Locale.ROOT);
+                  String d = Normalizer.normalize(s, Normalizer.Form.NFKD);
+                  StringBuilder b = new StringBuilder(d.length());
+                  for (i = 0; i < d.length(); i++) {
+                      char c = d.charAt(i);
+                      int t = Character.getType(c);
+                      if (t == Character.NON_SPACING_MARK || t == Character.ENCLOSING_MARK
+                              || t == Character.COMBINING_SPACING_MARK) continue;
+                      switch (c) {
+                          case 'œ': case 'Œ': b.append("oe"); break;
+                          case 'æ': case 'Æ': b.append("ae"); break;
+                          case 'ß': b.append("ss"); break;
+                          case 'ø': case 'Ø': b.append('o'); break;
+                          case 'đ': case 'Đ': b.append('d'); break;
+                          case 'ł': case 'Ł': b.append('l'); break;
+                          default: b.append(Character.toLowerCase(c));
                       }
-                      final String t = txt;
-                      ui.post(() -> {
-                          if (t == null) {
-                              Toast.makeText(this, "Lecture impossible", Toast.LENGTH_SHORT).show();
-                              finish();
-                              return;
-                          }
-                          et.setText(t);
-                          et.setHint("");
-                          loaded = true;
-                          et.addTextChangedListener(new TextWatcher() {
-                              public void beforeTextChanged(CharSequence s, int a, int b, int c) {
-                              }
-
-                              public void onTextChanged(CharSequence s, int a, int b, int c) {
-                              }
-
-                              public void afterTextChanged(Editable s) {
-                                  if (!dirty) {
-                                      dirty = true;
-                                      title.setText("● " + file.getName());
-                                  }
-                              }
-                          });
-                      });
-                  }).start();
-              }
-
-              TextView btn(String s, Runnable r) {
-                  TextView t = new TextView(this);
-                  t.setText(s);
-                  t.setTextColor(Color.WHITE);
-                  t.setTextSize(18);
-                  t.setGravity(Gravity.CENTER);
-                  t.setMinWidth(dp(44));
-                  t.setPadding(dp(8), dp(6), dp(8), dp(6));
-                  TypedValue tv = new TypedValue();
-                  getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true);
-                  t.setBackground(getDrawable(tv.resourceId));
-                  t.setOnClickListener(v -> r.run());
-                  return t;
-              }
-
-              void zoom(int d) {
-                  float px = et.getTextSize() / getResources().getDisplayMetrics().scaledDensity;
-                  float sp = Math.max(8, Math.min(32, Math.round(px) + d * 2));
-                  et.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-                  getSharedPreferences("fp", MODE_PRIVATE).edit().putFloat("edsize", sp).apply();
-              }
-
-              void save() {
-                  save(null);
-              }
-
-              void save(final Runnable after) {
-                  if (!loaded) return;
-                  final String txt = et.getText().toString();
-                  new Thread(() -> {
-                      boolean ok;
-                      try (OutputStream o = new FileOutputStream(file)) {
-                          o.write(txt.getBytes(StandardCharsets.UTF_8));
-                          ok = true;
-                      } catch (Exception e) {
-                          ok = false;
-                      }
-                      final boolean fok = ok;
-                      ui.post(() -> {
-                          Toast.makeText(this, fok ? "Enregistré ✓" : "Échec de l'enregistrement", Toast.LENGTH_SHORT).show();
-                          if (fok) {
-                              dirty = false;
-                              title.setText(file.getName());
-                              if (after != null) after.run();
-                          }
-                      });
-                  }).start();
-              }
-
-              @Override
-              public void onBackPressed() {
-                  if (!dirty) {
-                      super.onBackPressed();
-                      return;
                   }
-                  new AlertDialog.Builder(this).setTitle("Modifications non enregistrées")
-                          .setMessage("Voulez-vous enregistrer avant de quitter ?")
-                          .setPositiveButton("Enregistrer", (d, w) -> save(this::finish))
-                          .setNeutralButton("Quitter sans enregistrer", (d, w) -> finish())
-                          .setNegativeButton("Annuler", null).show();
+                  return b.toString();
               }
           }
           FIN_DU_FICHIER
           mkdir -p app/src/main/java/com/fichierspro/app
-          cat > app/src/main/java/com/fichierspro/app/FilesProvider.java << 'FIN_DU_FICHIER'
+          cat > app/src/main/java/com/fichierspro/app/SearchEngine.java << 'FIN_DU_FICHIER'
           package com.fichierspro.app;
 
-          import android.content.ContentProvider;
-          import android.content.ContentValues;
-          import android.database.Cursor;
-          import android.database.MatrixCursor;
-          import android.net.Uri;
-          import android.os.ParcelFileDescriptor;
-          import android.provider.OpenableColumns;
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.concurrent.atomic.AtomicInteger;
 
-          import java.io.File;
-          import java.io.FileNotFoundException;
-
-          public class FilesProvider extends ContentProvider {
-
-              public static final String AUTH = "com.fichierspro.app.files";
-
-              public static Uri uriFor(File f) {
-                  return new Uri.Builder().scheme("content").authority(AUTH).path(f.getAbsolutePath()).build();
+          /**
+           * Moteur de recherche en mémoire : insensible à la casse et aux accents,
+           * résultats classés du plus proche au plus éloigné, tolérant aux fautes de frappe.
+           */
+          final class SearchEngine {
+              private SearchEngine() {
               }
 
-              static File fileOf(Uri u) {
-                  return new File(u.getPath());
-              }
+              static final int F_DIR = 1, F_HIDDEN = 2;
 
-              @Override
-              public boolean onCreate() {
-                  return true;
-              }
+              /** Instantané compact de l'index (tableaux parallèles). */
+              static final class Snapshot {
+                  long version;
+                  int n;
+                  String[] dirs;
+                  int[] parent;
+                  String[] name;
+                  String[] norm;
+                  long[] size;
+                  long[] mtime;
+                  byte[] flags;
 
-              @Override
-              public String getType(Uri uri) {
-                  return MainActivity.mimeOf(fileOf(uri));
-              }
-
-              @Override
-              public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-                  File f = fileOf(uri);
-                  if (!f.isFile()) throw new FileNotFoundException(f.getPath());
-                  return ParcelFileDescriptor.open(f, ParcelFileDescriptor.parseMode(mode));
-              }
-
-              @Override
-              public Cursor query(Uri uri, String[] projection, String sel, String[] args, String sort) {
-                  File f = fileOf(uri);
-                  String[] cols = projection != null ? projection : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
-                  MatrixCursor c = new MatrixCursor(cols, 1);
-                  Object[] row = new Object[cols.length];
-                  for (int i = 0; i < cols.length; i++) {
-                      if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) row[i] = f.getName();
-                      else if (OpenableColumns.SIZE.equals(cols[i])) row[i] = f.length();
+                  String path(int i) {
+                      String d = dirs[parent[i]];
+                      return d.endsWith("/") ? d + name[i] : d + "/" + name[i];
                   }
-                  c.addRow(row);
-                  return c;
               }
 
-              @Override
-              public Uri insert(Uri uri, ContentValues v) {
+              static final class Result {
+                  int[] idx = new int[0];
+                  int total;
+                  boolean fuzzy;
+              }
+
+              static String[] tokens(String normQuery) {
+                  String q = normQuery.trim();
+                  if (q.isEmpty()) return new String[0];
+                  return q.split("\\s+");
+              }
+
+              private static boolean alnum(char c) {
+                  return Character.isLetterOrDigit(c);
+              }
+
+              /** Score strict d'un mot de la requête dans un nom normalisé (0 = pas trouvé). */
+              static int strict(String norm, String t) {
+                  int idx = norm.indexOf(t);
+                  if (idx < 0) return 0;
+                  int nl = norm.length(), tl = t.length();
+                  if (nl == tl) return 1000;
+                  int dot = norm.lastIndexOf('.');
+                  if (idx == 0 && dot == tl) return 1000;
+                  int lenPen = Math.min((nl - tl) / 2, 40);
+                  if (idx == 0) return 850 - lenPen;
+                  int i = idx;
+                  while (i >= 0) {
+                      if (!alnum(norm.charAt(i - 1))) return 700 - Math.min(i, 50) - lenPen;
+                      i = norm.indexOf(t, i + 1);
+                      if (i <= 0) break;
+                  }
+                  return 500 - Math.min(idx, 50) - lenPen;
+              }
+
+              /** Distance de Damerau-Levenshtein bornée (retourne max+1 si dépassée). */
+              static int editDistance(String a, int a0, int al, String b, int b0, int bl, int max, int[][] buf) {
+                  if (Math.abs(al - bl) > max) return max + 1;
+                  int[] p2 = buf[0], p1 = buf[1], cur = buf[2];
+                  for (int j = 0; j <= bl; j++) p1[j] = j;
+                  for (int i = 1; i <= al; i++) {
+                      cur[0] = i;
+                      int best = cur[0];
+                      char ca = a.charAt(a0 + i - 1);
+                      for (int j = 1; j <= bl; j++) {
+                          char cb = b.charAt(b0 + j - 1);
+                          int c = ca == cb ? 0 : 1;
+                          int v = Math.min(Math.min(cur[j - 1] + 1, p1[j] + 1), p1[j - 1] + c);
+                          if (i > 1 && j > 1 && ca == b.charAt(b0 + j - 2) && a.charAt(a0 + i - 2) == cb)
+                              v = Math.min(v, p2[j - 2] + 1);
+                          cur[j] = v;
+                          if (v < best) best = v;
+                      }
+                      if (best > max) return max + 1;
+                      int[] tmp = p2;
+                      p2 = p1;
+                      p1 = cur;
+                      cur = tmp;
+                  }
+                  return p1[bl];
+              }
+
+              /** Score approximatif : fautes de frappe sur un mot du nom, ou lettres dans l'ordre. */
+              static int loose(String norm, String t, int[][] buf) {
+                  int tl = t.length();
+                  int max = tl <= 3 ? 0 : (tl <= 6 ? 1 : 2);
+                  int best = 0;
+                  if (max > 0) {
+                      int n = norm.length(), i = 0;
+                      while (i < n) {
+                          while (i < n && !alnum(norm.charAt(i))) i++;
+                          int s = i;
+                          while (i < n && alnum(norm.charAt(i))) i++;
+                          int wl = i - s;
+                          if (wl == 0 || wl > 60 || tl > 60) continue;
+                          int d = editDistance(t, 0, tl, norm, s, wl, max, buf);
+                          if (d <= max) best = Math.max(best, 400 - 80 * d);
+                          else if (wl > tl) {
+                              int pl = Math.min(wl, tl + 1);
+                              d = Math.min(editDistance(t, 0, tl, norm, s, tl, max, buf),
+                                      editDistance(t, 0, tl, norm, s, pl, max, buf));
+                              if (d <= max) best = Math.max(best, 370 - 80 * d);
+                          }
+                      }
+                  }
+                  if (best == 0 && tl >= 3) {
+                      int n = norm.length(), j = 0, first = -1, last = -1;
+                      for (int i = 0; i < n && j < tl; i++) {
+                          if (norm.charAt(i) == t.charAt(j)) {
+                              if (j == 0) first = i;
+                              last = i;
+                              j++;
+                          }
+                      }
+                      if (j == tl) {
+                          int span = last - first + 1;
+                          if (span <= tl * 2 + 1) best = 190 - Math.min(150, (span - tl) * 12) - Math.min(first, 20);
+                      }
+                  }
+                  return best;
+              }
+
+              private static int scoreStrict(String norm, String phrase, String[] toks) {
+                  if (toks.length == 1) return strict(norm, toks[0]);
+                  int p = strict(norm, phrase);
+                  if (p > 0) return Math.min(1000, p + 20);
+                  int sum = 0;
+                  for (String t : toks) {
+                      int s = strict(norm, t);
+                      if (s == 0) return 0;
+                      sum += s;
+                  }
+                  return sum / toks.length * 9 / 10;
+              }
+
+              private static int scoreLoose(String norm, String[] toks, int[][] buf) {
+                  int sum = 0;
+                  for (String t : toks) {
+                      int s = strict(norm, t);
+                      if (s == 0) s = loose(norm, t, buf);
+                      if (s == 0) return 0;
+                      sum += Math.min(s, 450);
+                  }
+                  return sum / toks.length * 8 / 10;
+              }
+
+              static Result search(Snapshot sn, String rawQuery, String scopeDir, boolean showHidden, int limit,
+                                   boolean allowLoose, AtomicInteger gen, int myGen) {
+                  Result res = new Result();
+                  String phrase = Norm.of(rawQuery).trim().replaceAll("\\s+", " ");
+                  String[] toks = tokens(phrase);
+                  if (toks.length == 0 || sn == null || sn.n == 0) return res;
+                  boolean[] dirOk = null;
+                  if (scopeDir != null) {
+                      dirOk = new boolean[sn.dirs.length];
+                      String pre = scopeDir.endsWith("/") ? scopeDir : scopeDir + "/";
+                      for (int d = 0; d < dirOk.length; d++)
+                          dirOk[d] = sn.dirs[d].equals(scopeDir) || sn.dirs[d].startsWith(pre);
+                  }
+                  int n = sn.n;
+                  long[] keys = new long[1024];
+                  int k = 0;
+                  boolean[] hit = new boolean[n];
+                  for (int i = 0; i < n; i++) {
+                      if ((i & 4095) == 0 && gen != null && gen.get() != myGen) return null;
+                      byte fl = sn.flags[i];
+                      if (!showHidden && (fl & F_HIDDEN) != 0) continue;
+                      if (dirOk != null && !dirOk[sn.parent[i]]) continue;
+                      int s = scoreStrict(sn.norm[i], phrase, toks);
+                      if (s <= 0) continue;
+                      hit[i] = true;
+                      if ((fl & F_DIR) != 0) s += 15;
+                      if (k == keys.length) keys = Arrays.copyOf(keys, k * 2);
+                      keys[k++] = key(s, sn.norm[i].length(), i);
+                  }
+                  if (allowLoose && k < 25) {
+                      int[][] buf = new int[3][64];
+                      for (int i = 0; i < n; i++) {
+                          if ((i & 1023) == 0 && gen != null && gen.get() != myGen) return null;
+                          if (hit[i]) continue;
+                          byte fl = sn.flags[i];
+                          if (!showHidden && (fl & F_HIDDEN) != 0) continue;
+                          if (dirOk != null && !dirOk[sn.parent[i]]) continue;
+                          int s = scoreLoose(sn.norm[i], toks, buf);
+                          if (s <= 0) continue;
+                          res.fuzzy = true;
+                          if (k == keys.length) keys = Arrays.copyOf(keys, k * 2);
+                          keys[k++] = key(s, sn.norm[i].length(), i);
+                      }
+                  }
+                  Arrays.sort(keys, 0, k);
+                  res.total = k;
+                  int m = Math.min(k, limit);
+                  res.idx = new int[m];
+                  for (int i = 0; i < m; i++) res.idx[i] = (int) (keys[i] & 0x3FFFFFFFL);
+                  return res;
+              }
+
+              private static long key(int score, int len, int idx) {
+                  return ((long) (2047 - Math.min(score, 2047)) << 40) | ((long) Math.min(len, 1023) << 30) | idx;
+              }
+
+              /** Zone du nom à surligner : {début, fin} ou null. */
+              static int[] highlight(String name, String rawQuery) {
+                  String norm = Norm.of(name);
+                  if (norm.length() != name.length()) return null;
+                  String phrase = Norm.of(rawQuery).trim().replaceAll("\\s+", " ");
+                  if (phrase.isEmpty()) return null;
+                  int i = norm.indexOf(phrase);
+                  if (i >= 0) return new int[]{i, i + phrase.length()};
+                  String[] toks = tokens(phrase);
+                  for (String t : toks) {
+                      i = norm.indexOf(t);
+                      if (i >= 0) return new int[]{i, i + t.length()};
+                  }
                   return null;
               }
 
-              @Override
-              public int delete(Uri uri, String s, String[] a) {
-                  return 0;
-              }
-
-              @Override
-              public int update(Uri uri, ContentValues v, String s, String[] a) {
-                  return 0;
+              static Snapshot build(ArrayList<String[]> rows) {
+                  Snapshot s = new Snapshot();
+                  s.n = rows.size();
+                  s.name = new String[s.n];
+                  s.norm = new String[s.n];
+                  s.parent = new int[s.n];
+                  s.size = new long[s.n];
+                  s.mtime = new long[s.n];
+                  s.flags = new byte[s.n];
+                  ArrayList<String> dirs = new ArrayList<>();
+                  java.util.HashMap<String, Integer> map = new java.util.HashMap<>();
+                  for (int i = 0; i < s.n; i++) {
+                      String[] r = rows.get(i);
+                      Integer d = map.get(r[0]);
+                      if (d == null) {
+                          d = dirs.size();
+                          dirs.add(r[0]);
+                          map.put(r[0], d);
+                      }
+                      s.parent[i] = d;
+                      s.name[i] = r[1];
+                      s.norm[i] = Norm.of(r[1]);
+                  }
+                  s.dirs = dirs.toArray(new String[0]);
+                  return s;
               }
           }
           FIN_DU_FICHIER
