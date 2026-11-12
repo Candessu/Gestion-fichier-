@@ -1,4 +1,4 @@
-# Fichiers Pro 2.3 — gestionnaire de fichiers Android (APK native)
+# Fichiers Pro 2.4 — gestionnaire de fichiers Android (APK native)
 # Mettre ce fichier dans GitHub : .github/workflows/fichiers-pro.yml
 # Puis : onglet Actions > "Construire Fichiers Pro" > Run workflow.
 # L'APK se télécharge dans l'onglet Actions > dernier build > Artifacts.
@@ -60,8 +60,8 @@ jobs:
                   applicationId 'com.fichierspro.app'
                   minSdk 26
                   targetSdk 34
-                  versionCode 5
-                  versionName '2.3'
+                  versionCode 6
+                  versionName '2.4'
               }
               signingConfigs {
                   release {
@@ -945,6 +945,7 @@ jobs:
                   final boolean full = fullAsked || now - prefs.getLong("idx_full", 0) > FULL_EVERY;
                   final List<String> roots = roots(ctx);
                   final String trash = trashPath();
+                  final String vault = Vault.root().getAbsolutePath();
 
                   // lignes d'un stockage retiré (carte SD enlevée…)
                   StringBuilder w = new StringBuilder();
@@ -955,6 +956,11 @@ jobs:
                       args.add(r + "/");
                       args.add(r + "0");
                   }
+                  // le coffre-fort n'est jamais indexé
+                  range(db, "files", vault);
+                  range(db, "dirs", vault);
+                  db.execSQL("DELETE FROM files WHERE path=?", new Object[]{vault});
+                  db.execSQL("DELETE FROM dirs WHERE path=?", new Object[]{vault});
                   db.execSQL("DELETE FROM files WHERE NOT (" + w + ")", args.toArray());
                   db.execSQL("DELETE FROM dirs WHERE NOT (" + w + " OR path IN ("
                           + placeholders(roots.size()) + "))", concat(args, roots));
@@ -997,6 +1003,7 @@ jobs:
                       }
                       HashSet<String> excluded = new HashSet<>();
                       excluded.add(trash);
+                      excluded.add(vault);
                       final int[] n = {0, 0};
                       final long[] last = {SystemClock.uptimeMillis()};
                       int threads = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() - 1));
@@ -1090,6 +1097,7 @@ jobs:
                                   lastOk = false;
                                   for (String r : roots) if (parent.equals(r) || parent.startsWith(r + "/")) lastOk = true;
                                   if (parent.equals(trash) || parent.startsWith(trash + "/")) lastOk = false;
+                                  if (parent.equals(vaultPath) || parent.startsWith(vaultPath + "/")) lastOk = false;
                                   lastHidden = hiddenDir(parent, roots);
                               }
                               if (!lastOk) continue;
@@ -1105,6 +1113,8 @@ jobs:
                       if (c != null) c.close();
                   }
               }
+
+              private static final String vaultPath = Vault.root() == null ? "" : Vault.root().getAbsolutePath();
 
               private static int applyDir(SQLiteDatabase db, IndexWalker.DirResult r, List<String> roots, String trash,
                                           SQLiteStatement ins, SQLiteStatement del, SQLiteStatement delDir,
@@ -1125,7 +1135,7 @@ jobs:
                   int ch = 0;
                   for (IndexWalker.Entry e : r.entries) {
                       String path = IndexWalker.join(dir, e.name);
-                      if (path.equals(trash)) continue;
+                      if (path.equals(trash) || path.equals(vaultPath)) continue;
                       if (!e.dir && e.mtime > youngAfter) young = true;
                       long[] o = old.remove(e.name);
                       boolean typeChanged = o != null && (o[2] == 1) != e.dir;
@@ -1399,6 +1409,22 @@ jobs:
                   return new Uri.Builder().scheme("content").authority(AUTH).path(f.getAbsolutePath()).build();
               }
 
+              /** Fichier dont le nom réel diffère du nom affiché (coffre-fort). */
+              public static Uri uriFor(File f, String name) {
+                  if (name == null || name.equals(f.getName())) return uriFor(f);
+                  return new Uri.Builder().scheme("content").authority(AUTH).path(f.getAbsolutePath())
+                          .appendQueryParameter("n", name).build();
+              }
+
+              static String nameOf(Uri u) {
+                  String n = null;
+                  try {
+                      n = u.getQueryParameter("n");
+                  } catch (Exception ignored) {
+                  }
+                  return n != null ? n : fileOf(u).getName();
+              }
+
               static File fileOf(Uri u) {
                   return new File(u.getPath());
               }
@@ -1410,7 +1436,7 @@ jobs:
 
               @Override
               public String getType(Uri uri) {
-                  return MainActivity.mimeOf(fileOf(uri));
+                  return MainActivity.mimeOf(new File(nameOf(uri)));
               }
 
               @Override
@@ -1427,7 +1453,7 @@ jobs:
                   MatrixCursor c = new MatrixCursor(cols, 1);
                   Object[] row = new Object[cols.length];
                   for (int i = 0; i < cols.length; i++) {
-                      if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) row[i] = f.getName();
+                      if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) row[i] = nameOf(uri);
                       else if (OpenableColumns.SIZE.equals(cols[i])) row[i] = f.length();
                   }
                   c.addRow(row);
@@ -2070,6 +2096,7 @@ jobs:
           import android.widget.PopupMenu;
           import android.widget.ProgressBar;
           import android.widget.ScrollView;
+          import android.widget.Switch;
           import android.widget.TextView;
           import android.widget.Toast;
 
@@ -2102,7 +2129,7 @@ jobs:
 
           public class MainActivity extends Activity {
 
-              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4, M_ANALYSIS = 5, M_APPS = 6;
+              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4, M_ANALYSIS = 5, M_APPS = 6, M_SETTINGS = 7, M_VAULT = 8;
 
               static final Set<String> IMG = set("jpg jpeg png gif bmp webp heic heif");
               static final Set<String> VID = set("mp4 mkv avi mov 3gp webm flv wmv m4v ts");
@@ -2220,7 +2247,8 @@ jobs:
                   }
                   ensureIndex();
                   String last = state != null ? state.getString("dir") : null;
-                  if (last != null && new File(last).isDirectory()) browse(new File(last), null);
+                  if (state != null && state.getBoolean("settings")) showSettings();
+                  else if (last != null && new File(last).isDirectory()) browse(new File(last), null);
                   else showHome();
               }
 
@@ -2228,11 +2256,24 @@ jobs:
               protected void onSaveInstanceState(Bundle out) {
                   super.onSaveInstanceState(out);
                   if (mode == M_BROWSE && currentDir != null) out.putString("dir", currentDir.getAbsolutePath());
+                  if (mode == M_SETTINGS) out.putBoolean("settings", true);
+              }
+
+              @Override
+              protected void onStop() {
+                  super.onStop();
+                  // le coffre se reverrouille dès que l'appli passe en arrière-plan
+                  if (mode == M_VAULT && !vaultExternal && vaultScreen == 2) {
+                      vaultUnlocked = false;
+                      showVaultLock(null);
+                  }
               }
 
               @Override
               protected void onResume() {
                   super.onResume();
+                  vaultExternal = false;
+                  if (mode == M_SETTINGS && hasPerm()) showSettings();
                   if (waitingPerm && hasPerm()) {
                       waitingPerm = false;
                       showHome();
@@ -2282,6 +2323,14 @@ jobs:
                   }
                   if (mode == M_ANALYSIS) {
                       anaBack();
+                      return;
+                  }
+                  if (mode == M_SETTINGS) {
+                      showHome();
+                      return;
+                  }
+                  if (mode == M_VAULT) {
+                      vaultBack();
                       return;
                   }
                   if (mode == M_APPS) {
@@ -2397,6 +2446,7 @@ jobs:
 
               String displayName(File f) {
                   if (mode == M_TRASH) return f.getName().replaceFirst("^\\d+_\\d+_", "");
+                  if (mode == M_VAULT) return vaultName(f);
                   String n = f.getName();
                   return n.isEmpty() ? "/" : n;
               }
@@ -2584,7 +2634,10 @@ jobs:
                   top.setBackgroundColor(cPrimary);
                   top.setPadding(dp(4), dp(8), dp(4), dp(8));
                   top.setElevation(dp(4));
-                  btnBack = iconBtn("←", v -> onBackPressed());
+                  btnBack = iconBtn("←", v -> {
+                      if (mode == M_HOME && selected.isEmpty()) showSettings();
+                      else onBackPressed();
+                  });
                   top.addView(btnBack);
                   LinearLayout tcol = new LinearLayout(this);
                   titleCol = tcol;
@@ -2766,7 +2819,8 @@ jobs:
               void updateEmpty() {
                   boolean show = items.isEmpty() && loading.getVisibility() != View.VISIBLE;
                   if (mode == M_SEARCH && searchQuery.isEmpty() && !instantMode) show = false;
-                  emptyView.setText(mode == M_TRASH ? "🗑\n\nLa corbeille est vide"
+                  emptyView.setText(mode == M_VAULT ? "🔒\n\nLe coffre est vide\n\nAppuyez sur + pour savoir comment ajouter des fichiers"
+                          : mode == M_TRASH ? "🗑\n\nLa corbeille est vide"
                           : mode == M_SEARCH ? "🔎\n\nAucun résultat"
                           : mode == M_LIST ? "📂\n\nAucun fichier dans cette catégorie" : "📂\n\nDossier vide");
                   emptyView.setVisibility(show ? View.VISIBLE : View.GONE);
@@ -2774,6 +2828,10 @@ jobs:
 
               void updateHeader() {
                   topActions.removeAllViews();
+                  if (mode != M_VAULT) vaultUnlocked = false;
+                  if (mode == M_VAULT && prefs.getBoolean("vault_secure", true))
+                      getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                  else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
                   typeScroll.setVisibility(mode == M_SEARCH && instantMode && selected.isEmpty() ? View.VISIBLE : View.GONE);
                   searchInfo.setVisibility(mode == M_SEARCH && selected.isEmpty() ? View.VISIBLE : View.GONE);
                   boolean bar = mode == M_SEARCH && selected.isEmpty();
@@ -2791,6 +2849,8 @@ jobs:
                           case M_HOME:
                               tvTitle.setText("Fichiers Pro");
                               tvSub.setText("Gestionnaire de fichiers");
+                              btnBack.setText("⚙");
+                              btnBack.setVisibility(View.VISIBLE);
                               break;
                           case M_BROWSE:
                               String n = currentDir.equals(internalRoot()) ? "Stockage interne" : displayName(currentDir);
@@ -2802,8 +2862,11 @@ jobs:
                               tvSub.setText(subText);
                       }
                       if (mode == M_SEARCH) topActions.addView(iconBtn("✕", v -> searchEdit.setText("")));
-                      else if (mode != M_TRASH && mode != M_PERM && mode != M_APPS) topActions.addView(iconBtn("🔍", v -> openSearch()));
-                      if (mode != M_PERM) topActions.addView(iconBtn("⋮", this::mainMenu));
+                      else if (mode != M_TRASH && mode != M_PERM && mode != M_APPS && mode != M_SETTINGS && mode != M_VAULT)
+                          topActions.addView(iconBtn("🔍", v -> openSearch()));
+                      if (mode == M_VAULT && vaultScreen == 2) topActions.addView(iconBtn("🔒", v -> vaultLockNow()));
+                      if (mode != M_PERM && mode != M_SETTINGS && (mode != M_VAULT || vaultScreen == 2))
+                          topActions.addView(iconBtn("⋮", this::mainMenu));
                   }
                   updateBottom();
                   updateUsageChip();
@@ -2828,10 +2891,21 @@ jobs:
                       if (mode == M_TRASH) {
                           bottomBtn("♻", "Restaurer", v -> restore(new ArrayList<>(selected)));
                           bottomBtn("🗑", "Supprimer", v -> deletePermanent(new ArrayList<>(selected)));
+                      } else if (mode == M_VAULT) {
+                          if (vaultPath == null) bottomBtn("🔓", "Restaurer", v -> vaultRestore(new ArrayList<>(selected)));
+                          bottomBtn("🗑", "Supprimer", v -> vaultDelete(new ArrayList<>(selected)));
+                          bottomBtn("📤", "Partager", v -> vaultShare(new ArrayList<>(selected)));
+                          if (selected.size() == 1 && selected.iterator().next().isFile())
+                              bottomBtn("📂", "Ouvrir avec", v -> {
+                                  File f = selected.iterator().next();
+                                  vaultExternal = true;
+                                  openWith(f, vaultName(f), true);
+                              });
                       } else {
                           bottomBtn("📋", "Copier", v -> setClip(false));
                           bottomBtn("✂", "Couper", v -> setClip(true));
                           bottomBtn("🗑", "Supprimer", v -> askDelete());
+                          bottomBtn("🔒", "Coffre", v -> askVault(new ArrayList<>(selected)));
                           if (selected.size() == 1) bottomBtn("✏", "Renommer", v -> rename(selected.iterator().next()));
                           bottomBtn("⋯", "Plus", this::moreMenu);
                       }
@@ -2862,9 +2936,7 @@ jobs:
                   selected.clear();
                   prevDir = null;
                   crumbScroll.setVisibility(View.GONE);
-                  btnBack.setVisibility(View.GONE);
                   updateHeader();
-                  btnBack.setVisibility(View.GONE);
 
                   ScrollView sv = new ScrollView(this);
                   LinearLayout col = new LinearLayout(this);
@@ -3144,6 +3216,7 @@ jobs:
                   if (keepPos < 0) loading.setVisibility(View.VISIBLE);
                   final boolean fast = !rootOf(dir).getPath().equals("/");
                   final String dpath = dir.getAbsolutePath();
+                  final String vaultDir = Vault.root().getAbsolutePath();
                   bg.execute(() -> {
                       final ArrayList<File> res = new ArrayList<>();
                       boolean ok = false;
@@ -3153,6 +3226,7 @@ jobs:
                               ok = true;
                               for (IndexWalker.Entry e : es) {
                                   if (!hidden && e.name.startsWith(".")) continue;
+                                  if (IndexWalker.join(dpath, e.name).equals(vaultDir)) continue;
                                   res.add(new IFile(IndexWalker.join(dpath, e.name), e.dir, e.size, e.mtime));
                               }
                           }
@@ -3162,6 +3236,7 @@ jobs:
                               ok = true;
                               for (File f : fs) {
                                   if (!hidden && f.getName().startsWith(".")) continue;
+                                  if (f.getAbsolutePath().equals(vaultDir)) continue;
                                   res.add(new IFile(f.getPath(), f.isDirectory(), f.length(), f.lastModified()));
                               }
                           }
@@ -3808,6 +3883,12 @@ jobs:
                       case M_APPS:
                           if (appsAdapter != null) appsAdapter.notifyDataSetChanged();
                           break;
+                      case M_VAULT:
+                          if (vaultScreen == 2) showVaultList(vaultPath);
+                          break;
+                      case M_SETTINGS:
+                          showSettings();
+                          break;
                   }
               }
 
@@ -3820,6 +3901,11 @@ jobs:
                   }
                   if (mode == M_TRASH) {
                       trashItemDialog(f);
+                      return;
+                  }
+                  if (mode == M_VAULT) {
+                      if (f.isDirectory()) showVaultList(f);
+                      else openVaultFile(f);
                       return;
                   }
                   if (mode == M_SEARCH) {
@@ -3848,7 +3934,7 @@ jobs:
               void refreshSelectionUi() {
                   adapter.notifyDataSetChanged();
                   updateHeader();
-                  if (selected.isEmpty() && mode == M_HOME) btnBack.setVisibility(View.GONE);
+                  if (selected.isEmpty() && mode == M_HOME) updateHeader();
               }
 
               void openFile(File f) {
@@ -3870,8 +3956,12 @@ jobs:
               }
 
               void openWith(File f, boolean chooser) {
-                  Uri u = FilesProvider.uriFor(f);
-                  String mime = mimeOf(f);
+                  openWith(f, f.getName(), chooser);
+              }
+
+              void openWith(File f, String name, boolean chooser) {
+                  Uri u = FilesProvider.uriFor(f, name);
+                  String mime = mimeOf(new File(name));
                   Intent i = new Intent(Intent.ACTION_VIEW);
                   i.setDataAndType(u, mime);
                   i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
@@ -3928,6 +4018,12 @@ jobs:
                       m.add(0, 20, 0, "♻  Tout restaurer");
                       m.add(0, 21, 1, "🗑  Vider la corbeille");
                   }
+                  if (mode == M_VAULT) {
+                      m.add(0, 81, 0, "➕  Ajouter des fichiers…");
+                      m.add(0, 5, 1, "☑  Tout sélectionner");
+                      m.add(0, 82, 2, "🔑  Changer le code");
+                      m.add(0, 83, 3, "🔒  Verrouiller maintenant");
+                  }
                   if (mode == M_APPS) {
                       m.add(0, 70, 0, "↕  Trier les applications…");
                       m.add(0, 71, 1, "Afficher les applications système").setCheckable(true).setChecked(prefs.getBoolean("app_sys", false));
@@ -3942,14 +4038,17 @@ jobs:
                       m.add(0, 8, 3, "🏠  Accueil");
                   }
                   if (mode == M_HOME) {
+                      m.add(0, 80, 0, "⚙  Paramètres");
                       m.add(0, 62, 0, "📊  Analyse du stockage");
                       m.add(0, 30, 0, "🗂  Explorer la racine ( / )");
                       m.add(0, 40, 1, "🔄  Réindexer le stockage");
                       if (!recents().isEmpty()) m.add(0, 41, 2, "🕘  Effacer les fichiers récents");
                       m.add(0, 31, 2, "ℹ  À propos");
                   }
-                  m.add(1, 10, 20, "Afficher les fichiers cachés").setCheckable(true).setChecked(showHidden());
-                  m.add(1, 11, 21, "Thème sombre").setCheckable(true).setChecked(dark);
+                  if (mode != M_VAULT) {
+                      m.add(1, 10, 20, "Afficher les fichiers cachés").setCheckable(true).setChecked(showHidden());
+                      m.add(1, 11, 21, "Thème sombre").setCheckable(true).setChecked(dark);
+                  }
                   pm.setOnMenuItemClickListener(it -> {
                       switch (it.getItemId()) {
                           case 1:
@@ -4004,6 +4103,19 @@ jobs:
                               break;
                           case 70:
                               appsMenuSort();
+                              break;
+                          case 80:
+                              showSettings();
+                              break;
+                          case 81:
+                              vaultAddHelp();
+                              break;
+                          case 82:
+                              vaultUnlocked = true;
+                              showVaultSetup(true);
+                              break;
+                          case 83:
+                              vaultLockNow();
                               break;
                           case 71: {
                               prefs.edit().putBoolean("app_sys", !prefs.getBoolean("app_sys", false)).apply();
@@ -4071,9 +4183,9 @@ jobs:
                               browse(new File("/"), null);
                               break;
                           case 31:
-                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.3")
+                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.4")
                                       .setMessage("Gestionnaire de fichiers complet :\n\n• Explorer, copier, couper, coller\n• Corbeille avec restauration\n"
-                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Analyse du stockage en 1 clic (dossiers, types, gros fichiers)\n• Applications installées : taille réelle (appli, données, cache)\n• Catégories et gros fichiers indexés\n"
+                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Analyse du stockage en 1 clic (dossiers, types, gros fichiers)\n• Applications installées : taille réelle (appli, données, cache)\n• Coffre-fort protégé par code PIN ou mot de passe\n• Catégories et gros fichiers indexés\n"
                                               + "• Miniatures photos et vidéos\n• Éditeur de texte intégré\n• Favoris, récents, MD5, thème sombre")
                                       .setPositiveButton("OK", null).show();
                               break;
@@ -4084,6 +4196,10 @@ jobs:
               }
 
               void newMenu(View anchor) {
+                  if (mode == M_VAULT) {
+                      vaultAddHelp();
+                      return;
+                  }
                   PopupMenu pm = new PopupMenu(this, anchor);
                   pm.getMenu().add(0, 1, 0, "📁  Nouveau dossier");
                   pm.getMenu().add(0, 2, 1, "📝  Nouveau fichier texte");
@@ -5809,6 +5925,653 @@ jobs:
                           .setNegativeButton("Fermer", null).show();
               }
 
+              // ---------------------------------------------------------------- paramètres
+
+              LinearLayout settingsCard() {
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setBackground(round(cCard, 16));
+                  c.setElevation(dp(1));
+                  c.setClipToOutline(true);
+                  return c;
+              }
+
+              View settingRow(String title, String sub, View.OnClickListener l) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setOrientation(LinearLayout.VERTICAL);
+                  r.setPadding(dp(16), dp(13), dp(16), dp(13));
+                  if (l != null) {
+                      r.setBackground(ripple(false));
+                      r.setOnClickListener(l);
+                  }
+                  r.addView(text(title, 15, cText, false));
+                  if (sub != null) {
+                      TextView s = text(sub, 12, cSub, false);
+                      s.setPadding(0, dp(2), 0, 0);
+                      r.addView(s);
+                  }
+                  return r;
+              }
+
+              interface Toggle {
+                  void set(boolean on);
+              }
+
+              View switchRow(String title, String sub, boolean on, final Toggle t) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setGravity(Gravity.CENTER_VERTICAL);
+                  r.setPadding(dp(16), dp(10), dp(12), dp(10));
+                  r.setBackground(ripple(false));
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.addView(text(title, 15, cText, false));
+                  if (sub != null) {
+                      TextView s = text(sub, 12, cSub, false);
+                      s.setPadding(0, dp(2), 0, 0);
+                      c.addView(s);
+                  }
+                  r.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                  final Switch sw = new Switch(this);
+                  sw.setChecked(on);
+                  sw.setOnCheckedChangeListener((b, v) -> t.set(v));
+                  r.addView(sw);
+                  r.setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
+                  return r;
+              }
+
+              void showSettings() {
+                  back = null;
+                  listBack = null;
+                  mode = M_SETTINGS;
+                  selected.clear();
+                  scanGen++;
+                  listTitle = "Paramètres";
+                  subText = "Fichiers Pro 2.4";
+                  btnBack.setVisibility(View.VISIBLE);
+                  crumbScroll.setVisibility(View.GONE);
+                  ScrollView sv = new ScrollView(this);
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setPadding(dp(14), dp(4), dp(14), dp(28));
+                  sv.addView(col);
+
+                  col.addView(section("Vie privée"));
+                  LinearLayout p = settingsCard();
+                  Vault v = Vault.load();
+                  p.addView(settingRow("🔒  Coffre-fort",
+                          v.configured() ? fmtCount(v.list.size()) + " élément(s) protégé(s) par " + (v.type.equals("pin") ? "code PIN" : "mot de passe")
+                                  : "Non configuré : protégez des fichiers et dossiers par un code PIN ou un mot de passe",
+                          x -> openVault(M_SETTINGS)));
+                  if (v.configured()) {
+                      p.addView(settingRow("🔑  Changer le code du coffre", "Le code actuel sera demandé", x -> {
+                          vaultFrom = M_SETTINGS;
+                          vault = Vault.load();
+                          showVaultLock(() -> showVaultSetup(true));
+                      }));
+                  }
+                  p.addView(switchRow("🛡  Bloquer les captures d'écran du coffre",
+                          "Empêche aussi l'aperçu du coffre dans les applis récentes", prefs.getBoolean("vault_secure", true),
+                          on -> prefs.edit().putBoolean("vault_secure", on).apply()));
+                  col.addView(p);
+
+                  col.addView(section("Affichage"));
+                  LinearLayout a = settingsCard();
+                  a.addView(switchRow("🌙  Thème sombre", null, dark, on -> {
+                      prefs.edit().putBoolean("dark", on).apply();
+                      ui.postDelayed(this::recreate, 200);
+                  }));
+                  a.addView(switchRow("👁  Afficher les fichiers cachés", "Fichiers et dossiers dont le nom commence par un point",
+                          showHidden(), on -> prefs.edit().putBoolean("hidden", on).apply()));
+                  col.addView(a);
+
+                  col.addView(section("Stockage"));
+                  LinearLayout s = settingsCard();
+                  s.addView(settingRow("📊  Analyse du stockage", "Ce qui occupe votre espace, en un écran", x -> showAnalysis(internalRoot(), null)));
+                  s.addView(settingRow("🔄  Réindexer le stockage", "Reconstruit l'index des catégories et de la recherche", x -> {
+                      if (index != null) index.requestSync(true);
+                      toast("Mise à jour de l'index en arrière-plan…");
+                  }));
+                  s.addView(settingRow("🕘  Effacer les fichiers récents", null, x -> confirmClearRecents()));
+                  s.addView(settingRow("🔎  Effacer l'historique de recherche", null, x -> {
+                      prefs.edit().remove("sh").apply();
+                      toast("Historique de recherche effacé");
+                  }));
+                  col.addView(s);
+
+                  col.addView(section("Applications"));
+                  LinearLayout ap = settingsCard();
+                  boolean usage = AppStore.hasUsage(this);
+                  ap.addView(settingRow("📱  Taille réelle des applications",
+                          usage ? "Autorisé ✓  (appli + données + cache)" : "Non autorisé : appuyez pour autoriser « Accès aux données d'utilisation »",
+                          usage ? x -> showApps(null) : x -> requestUsageAccess()));
+                  col.addView(ap);
+
+                  col.addView(section("À propos"));
+                  LinearLayout ab = settingsCard();
+                  ab.addView(settingRow("ℹ  Fichiers Pro 2.4", "Gestionnaire de fichiers", x -> {
+                      new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.4")
+                              .setMessage("Explorateur, recherche globale et instantanée, analyse du stockage, applications, corbeille, ZIP, "
+                                      + "éditeur de texte et coffre-fort protégé par code.")
+                              .setPositiveButton("OK", null).show();
+                  }));
+                  col.addView(ab);
+
+                  content.removeAllViews();
+                  content.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+                  updateHeader();
+              }
+
+              // ---------------------------------------------------------------- coffre-fort (vie privée)
+
+              Vault vault;
+              boolean vaultUnlocked, vaultExternal;
+              int vaultFrom = M_HOME, vaultScreen, wrongTries;
+              long lockUntil;
+              File vaultPath;
+              final HashMap<String, Vault.Item> vaultMap = new HashMap<>();
+
+              void openVault(int from) {
+                  vaultFrom = from;
+                  vault = Vault.load();
+                  if (!vault.configured()) showVaultSetup(false);
+                  else if (vaultUnlocked) showVaultList(null);
+                  else showVaultLock(null);
+              }
+
+              void vaultScreenBase(String title, String sub, int screen) {
+                  back = null;
+                  listBack = null;
+                  mode = M_VAULT;
+                  vaultScreen = screen;
+                  selected.clear();
+                  scanGen++;
+                  listTitle = title;
+                  subText = sub;
+                  btnBack.setVisibility(View.VISIBLE);
+                  crumbScroll.setVisibility(View.GONE);
+              }
+
+              EditText secretField(boolean pin, String hint) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setSingleLine(true);
+                  e.setTextSize(18);
+                  e.setGravity(Gravity.CENTER);
+                  e.setInputType(pin ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                          : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                  return e;
+              }
+
+              TextView bigButton(String label, View.OnClickListener l) {
+                  TextView b = text(label, 16, Color.WHITE, true);
+                  b.setGravity(Gravity.CENTER);
+                  b.setPadding(dp(24), dp(14), dp(24), dp(14));
+                  b.setBackground(round(cPrimary, 26));
+                  b.setForeground(ripple(false));
+                  b.setOnClickListener(l);
+                  return b;
+              }
+
+              /** Création (ou changement) du code du coffre. */
+              void showVaultSetup(final boolean change) {
+                  vaultScreenBase(change ? "Nouveau code" : "Créer le coffre-fort", "Vie privée", 0);
+                  final boolean[] pin = {!"pwd".equals(vault != null ? vault.type : "pin")};
+                  ScrollView sv = new ScrollView(this);
+                  final LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setPadding(dp(24), dp(20), dp(24), dp(30));
+                  sv.addView(col);
+                  TextView ic = text("🔒", 56, cText, false);
+                  ic.setGravity(Gravity.CENTER);
+                  col.addView(ic);
+                  TextView t = text(change ? "Choisissez un nouveau code" : "Protégez vos fichiers privés", 20, cText, true);
+                  t.setGravity(Gravity.CENTER);
+                  t.setPadding(0, dp(8), 0, dp(6));
+                  col.addView(t);
+                  TextView m = text("Les fichiers mis au coffre disparaissent de l'application et de la galerie. "
+                          + "Ils ne s'affichent qu'après saisie du code.", 14, cSub, false);
+                  m.setGravity(Gravity.CENTER);
+                  col.addView(m);
+
+                  LinearLayout seg = new LinearLayout(this);
+                  seg.setOrientation(LinearLayout.HORIZONTAL);
+                  seg.setBackground(round(soft(cPrimary), 20));
+                  seg.setPadding(dp(3), dp(3), dp(3), dp(3));
+                  final TextView sPin = text("Code PIN", 14, Color.WHITE, true);
+                  final TextView sPwd = text("Mot de passe", 14, hi(), true);
+                  for (TextView x : new TextView[]{sPin, sPwd}) {
+                      x.setGravity(Gravity.CENTER);
+                      x.setPadding(dp(10), dp(8), dp(10), dp(8));
+                      seg.addView(x, new LinearLayout.LayoutParams(0, -2, 1));
+                  }
+                  LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, -2);
+                  slp.setMargins(0, dp(20), 0, dp(8));
+                  col.addView(seg, slp);
+                  final EditText e1 = secretField(pin[0], "Code (4 chiffres minimum)");
+                  final EditText e2 = secretField(pin[0], "Confirmez le code");
+                  col.addView(e1);
+                  col.addView(e2);
+                  final Runnable applySeg = () -> {
+                      sPin.setTextColor(pin[0] ? Color.WHITE : hi());
+                      sPin.setBackground(pin[0] ? round(cPrimary, 18) : null);
+                      sPwd.setTextColor(!pin[0] ? Color.WHITE : hi());
+                      sPwd.setBackground(!pin[0] ? round(cPrimary, 18) : null);
+                      int it = pin[0] ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                              : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
+                      e1.setInputType(it);
+                      e2.setInputType(it);
+                      e1.setHint(pin[0] ? "Code PIN (4 à 12 chiffres)" : "Mot de passe (4 caractères minimum)");
+                      e2.setHint("Confirmez");
+                  };
+                  sPin.setOnClickListener(x -> {
+                      pin[0] = true;
+                      applySeg.run();
+                  });
+                  sPwd.setOnClickListener(x -> {
+                      pin[0] = false;
+                      applySeg.run();
+                  });
+                  applySeg.run();
+
+                  TextView rq = text("Question de récupération (si vous oubliez le code)", 14, cText, true);
+                  rq.setPadding(0, dp(22), 0, dp(4));
+                  col.addView(rq);
+                  final EditText q = new EditText(this);
+                  q.setSingleLine(true);
+                  q.setHint("Ex. : nom de mon premier professeur ?");
+                  if (vault != null && vault.question != null) q.setText(vault.question);
+                  col.addView(q);
+                  final EditText ans = new EditText(this);
+                  ans.setSingleLine(true);
+                  ans.setHint("Réponse (majuscules et accents ignorés)");
+                  ans.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                  col.addView(ans);
+                  final TextView err = text("", 13, 0xFFE53935, false);
+                  err.setPadding(0, dp(8), 0, 0);
+                  col.addView(err);
+                  LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, -2);
+                  blp.topMargin = dp(18);
+                  col.addView(bigButton(change ? "Enregistrer le nouveau code" : "Créer le coffre", x -> {
+                      String a = e1.getText().toString(), b = e2.getText().toString();
+                      if (pin[0] && !a.matches("\\d{4,12}")) {
+                          err.setText("Le code PIN doit contenir 4 à 12 chiffres.");
+                          return;
+                      }
+                      if (!pin[0] && a.length() < 4) {
+                          err.setText("Le mot de passe doit contenir au moins 4 caractères.");
+                          return;
+                      }
+                      if (!a.equals(b)) {
+                          err.setText("Les deux codes ne sont pas identiques.");
+                          return;
+                      }
+                      String qq = q.getText().toString().trim(), aa = ans.getText().toString().trim();
+                      if (qq.isEmpty() || aa.isEmpty()) {
+                          err.setText("Renseignez la question et la réponse : elles permettent de récupérer le coffre en cas d'oubli.");
+                          return;
+                      }
+                      Vault v = Vault.load();
+                      v.setSecret(pin[0] ? "pin" : "pwd", a, qq, aa);
+                      try {
+                          v.save();
+                      } catch (IOException ex) {
+                          err.setText("Erreur : " + ex.getMessage());
+                          return;
+                      }
+                      vault = v;
+                      vaultUnlocked = true;
+                      hideKeyboard(e1);
+                      toast(change ? "Nouveau code enregistré" : "Coffre créé ✓");
+                      showVaultList(null);
+                      if (!change) vaultAddHelp();
+                  }), blp);
+                  content.removeAllViews();
+                  content.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+                  updateHeader();
+              }
+
+              void hideKeyboard(View v) {
+                  InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                  if (im != null && v != null) im.hideSoftInputFromWindow(v.getWindowToken(), 0);
+              }
+
+              /** Écran de déverrouillage. onOk = action après un code correct (null : ouvrir le coffre). */
+              void showVaultLock(final Runnable onOk) {
+                  if (vault == null) vault = Vault.load();
+                  final boolean pin = !"pwd".equals(vault.type);
+                  vaultScreenBase("Coffre-fort", "Verrouillé", 1);
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setGravity(Gravity.CENTER_HORIZONTAL);
+                  col.setPadding(dp(32), dp(48), dp(32), dp(32));
+                  TextView ic = text("🔒", 64, cText, false);
+                  ic.setGravity(Gravity.CENTER);
+                  col.addView(ic);
+                  TextView t = text(pin ? "Entrez votre code PIN" : "Entrez votre mot de passe", 19, cText, true);
+                  t.setGravity(Gravity.CENTER);
+                  t.setPadding(0, dp(12), 0, dp(16));
+                  col.addView(t);
+                  final EditText e = secretField(pin, pin ? "Code PIN" : "Mot de passe");
+                  col.addView(e, new LinearLayout.LayoutParams(-1, -2));
+                  final TextView err = text("", 13, 0xFFE53935, false);
+                  err.setGravity(Gravity.CENTER);
+                  err.setPadding(0, dp(8), 0, 0);
+                  col.addView(err);
+                  final Runnable submit = () -> {
+                      long now = SystemClock.elapsedRealtime();
+                      if (now < lockUntil) {
+                          err.setText("Trop d'essais. Réessayez dans " + ((lockUntil - now) / 1000 + 1) + " s.");
+                          return;
+                      }
+                      if (vault.check(e.getText().toString())) {
+                          wrongTries = 0;
+                          hideKeyboard(e);
+                          vaultUnlocked = true;
+                          if (onOk != null) onOk.run();
+                          else showVaultList(null);
+                      } else {
+                          wrongTries++;
+                          e.setText("");
+                          if (wrongTries >= 5) {
+                              lockUntil = now + 30000L * (1L << Math.min(4, wrongTries - 5));
+                              err.setText("Code incorrect. Coffre bloqué " + (30L << Math.min(4, wrongTries - 5)) + " s.");
+                          } else err.setText("Code incorrect (" + (5 - wrongTries) + " essai(s) avant blocage).");
+                      }
+                  };
+                  e.setImeOptions(EditorInfo.IME_ACTION_DONE);
+                  e.setOnEditorActionListener((v, id, ev) -> {
+                      submit.run();
+                      return true;
+                  });
+                  LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, -2);
+                  blp.topMargin = dp(18);
+                  col.addView(bigButton("Déverrouiller", x -> submit.run()), blp);
+                  TextView forgot = text("Code oublié ?", 14, hi(), true);
+                  forgot.setPadding(dp(12), dp(18), dp(12), dp(12));
+                  forgot.setOnClickListener(x -> forgotSecret());
+                  col.addView(forgot);
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(col);
+                  content.removeAllViews();
+                  content.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+                  updateHeader();
+                  e.requestFocus();
+                  e.post(() -> {
+                      InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                      if (im != null && mode == M_VAULT) im.showSoftInput(e, InputMethodManager.SHOW_IMPLICIT);
+                  });
+              }
+
+              void forgotSecret() {
+                  if (vault == null || vault.qhash == null) {
+                      new AlertDialog.Builder(this).setTitle("Code oublié")
+                              .setMessage("Aucune question de récupération n'a été définie : le code ne peut pas être réinitialisé.")
+                              .setPositiveButton("OK", null).show();
+                      return;
+                  }
+                  final EditText a = new EditText(this);
+                  a.setSingleLine(true);
+                  a.setHint("Votre réponse");
+                  a.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                  FrameLayout box = new FrameLayout(this);
+                  box.setPadding(dp(22), dp(6), dp(22), 0);
+                  box.addView(a);
+                  new AlertDialog.Builder(this).setTitle(vault.question).setView(box)
+                          .setPositiveButton("Valider", (d, w) -> {
+                              long now = SystemClock.elapsedRealtime();
+                              if (now < lockUntil) {
+                                  toast("Trop d'essais, patientez");
+                                  return;
+                              }
+                              if (vault.checkAnswer(a.getText().toString())) {
+                                  wrongTries = 0;
+                                  vaultUnlocked = true;
+                                  showVaultSetup(true);
+                              } else {
+                                  wrongTries++;
+                                  if (wrongTries >= 5) lockUntil = now + 30000L * (1L << Math.min(4, wrongTries - 5));
+                                  toast("Réponse incorrecte");
+                              }
+                          }).setNegativeButton("Annuler", null).show();
+              }
+
+              void showVaultList(final File path) {
+                  if (vault == null) vault = Vault.load();
+                  vaultPath = path;
+                  String title = path == null ? "🔒 Coffre-fort" : vaultName(path);
+                  vaultScreenBase(title, "", 2);
+                  showListUi(title, false, true);
+                  vaultMap.clear();
+                  ArrayList<File> l = new ArrayList<>();
+                  if (path == null) {
+                      vault = Vault.load();
+                      ArrayList<Vault.Item> its = new ArrayList<>(vault.list);
+                      Collections.sort(its, (a, b) -> Long.compare(b.added, a.added));
+                      for (Vault.Item it : its) {
+                          vaultMap.put(it.id, it);
+                          l.add(new IFile(it.file().getPath(), it.dir, it.size, it.mtime));
+                      }
+                      subText = fmtCount(its.size()) + " élément(s)  •  " + fmtSize(vault.totalSize()) + "  •  invisibles ailleurs";
+                  } else {
+                      ArrayList<IndexWalker.Entry> es = IndexWalker.list(path.getAbsolutePath());
+                      if (es != null) for (IndexWalker.Entry e : es) {
+                          if (e.name.equals(".nomedia")) continue;
+                          l.add(new IFile(IndexWalker.join(path.getAbsolutePath(), e.name), e.dir, e.size, e.mtime));
+                      }
+                      sortFiles(l, 0, true);
+                      subText = fmtCount(l.size()) + " élément(s)  •  dans le coffre";
+                  }
+                  items.clear();
+                  items.addAll(l);
+                  loading.setVisibility(View.GONE);
+                  adapter.notifyDataSetChanged();
+                  updateHeader();
+                  updateEmpty();
+              }
+
+              /** Nom affiché d'un élément du coffre (le fichier réel porte un identifiant). */
+              String vaultName(File f) {
+                  Vault.Item it = vaultMap.get(f.getName());
+                  if (it != null && Vault.items().equals(f.getParentFile())) return it.name;
+                  if (vault != null && Vault.items().equals(f.getParentFile())) {
+                      Vault.Item x = vault.find(f.getName());
+                      if (x != null) return x.name;
+                  }
+                  return f.getName();
+              }
+
+              void vaultBack() {
+                  if (vaultScreen == 2 && vaultPath != null) {
+                      File p = vaultPath.getParentFile();
+                      if (p == null || p.equals(Vault.items())) showVaultList(null);
+                      else showVaultList(p);
+                      return;
+                  }
+                  vaultUnlocked = false;
+                  if (vaultFrom == M_SETTINGS) showSettings();
+                  else showHome();
+              }
+
+              void vaultLockNow() {
+                  vaultUnlocked = false;
+                  showVaultLock(null);
+              }
+
+              void vaultAddHelp() {
+                  new AlertDialog.Builder(this).setTitle("Ajouter au coffre")
+                          .setMessage("1. Ouvrez un dossier, une catégorie ou une recherche.\n"
+                                  + "2. Appuyez longuement sur les fichiers ou dossiers à protéger.\n"
+                                  + "3. Appuyez sur « 🔒 Coffre » en bas de l'écran.\n\n"
+                                  + "Ils disparaissent alors de l'application et de la galerie.")
+                          .setPositiveButton("Parcourir le stockage", (d, w) -> {
+                              vaultUnlocked = false;
+                              browse(internalRoot(), null);
+                          })
+                          .setNegativeButton("Fermer", null).show();
+              }
+
+              void openVaultFile(File f) {
+                  vaultExternal = true;
+                  openWith(f, vaultName(f), false);
+              }
+
+              /** Depuis l'explorateur : déplace la sélection dans le coffre. */
+              void askVault(final ArrayList<File> fs) {
+                  final Vault v = Vault.load();
+                  if (!v.configured()) {
+                      new AlertDialog.Builder(this).setTitle("Coffre-fort non configuré")
+                              .setMessage("Créez d'abord le code du coffre, puis sélectionnez à nouveau les éléments.")
+                              .setPositiveButton("Créer le coffre", (d, w) -> openVault(M_HOME))
+                              .setNegativeButton("Annuler", null).show();
+                      return;
+                  }
+                  final String vroot = Vault.root().getAbsolutePath();
+                  new AlertDialog.Builder(this).setTitle("Mettre " + fs.size() + " élément(s) au coffre ?")
+                          .setMessage("Ils seront déplacés dans le coffre-fort et n'apparaîtront plus dans l'application ni dans la galerie. "
+                                  + "Pour les revoir : ⚙ Paramètres > Coffre-fort, avec votre code.")
+                          .setPositiveButton("🔒  Mettre au coffre", (d, w) -> runOp("Mise au coffre…", op -> {
+                              v.ensureDirs();
+                              long tot = 0;
+                              for (File f : fs) tot += sizeRec(f);
+                              op.total = tot;
+                              int n = 0;
+                              List<String> rec = recents();
+                              Set<String> fav = favorites();
+                              for (File f : fs) {
+                                  if (op.cancel) break;
+                                  String p = f.getAbsolutePath();
+                                  if (p.equals(vroot) || p.startsWith(vroot + "/")) continue;
+                                  Vault.Item it = new Vault.Item();
+                                  it.id = Vault.newId();
+                                  it.name = f.getName();
+                                  it.orig = p;
+                                  it.dir = f.isDirectory();
+                                  it.size = sizeRec(f);
+                                  it.mtime = f.lastModified();
+                                  it.added = System.currentTimeMillis();
+                                  File dst = it.file();
+                                  op.current = it.name;
+                                  if (f.renameTo(dst)) {
+                                      op.done += it.size;
+                                  } else {
+                                      int before = op.errors;
+                                      copyRec(f, dst, op);
+                                      if (op.cancel || op.errors != before) {
+                                          deleteRec(dst);
+                                          continue;
+                                      }
+                                      deleteRec(f);
+                                  }
+                                  v.list.add(it);
+                                  v.save();
+                                  n++;
+                                  for (Iterator<String> i = rec.iterator(); i.hasNext(); ) {
+                                      String r = i.next();
+                                      if (r.equals(p) || r.startsWith(p + "/")) i.remove();
+                                  }
+                                  fav.remove(p);
+                              }
+                              prefs.edit().putString("rec", TextUtils.join("\n", rec)).putStringSet("fav", fav).apply();
+                              op.msg = n + " élément(s) mis au coffre 🔒";
+                          }, null))
+                          .setNegativeButton("Annuler", null).show();
+              }
+
+              void vaultRestore(final ArrayList<File> fs) {
+                  runOp("Restauration…", op -> {
+                      Vault v = Vault.load();
+                      int n = 0;
+                      for (File f : fs) {
+                          if (op.cancel) break;
+                          Vault.Item it = v.find(f.getName());
+                          if (it == null) continue;
+                          File target = new File(it.orig);
+                          File parent = target.getParentFile();
+                          if (parent == null || (!parent.exists() && !parent.mkdirs())) {
+                              parent = new File(internalRoot(), "Restaurés du coffre");
+                              parent.mkdirs();
+                              target = new File(parent, it.name);
+                          }
+                          if (target.exists()) target = uniqueDest(parent, it.name);
+                          op.current = it.name;
+                          File src = it.file();
+                          if (!src.renameTo(target)) {
+                              int before = op.errors;
+                              copyRec(src, target, op);
+                              if (op.cancel || op.errors != before) {
+                                  deleteRec(target);
+                                  continue;
+                              }
+                              deleteRec(src);
+                          }
+                          v.list.remove(it);
+                          v.save();
+                          n++;
+                      }
+                      op.msg = n + " élément(s) restauré(s) à leur emplacement d'origine";
+                  }, null);
+              }
+
+              void vaultDelete(final ArrayList<File> fs) {
+                  new AlertDialog.Builder(this).setTitle("Supprimer définitivement ?")
+                          .setMessage(fs.size() + " élément(s) seront effacés du coffre. Cette action est irréversible.")
+                          .setPositiveButton("Supprimer", (d, w) -> runOp("Suppression…", op -> {
+                              Vault v = Vault.load();
+                              for (File f : fs) {
+                                  if (op.cancel) break;
+                                  op.current = vaultName(f);
+                                  if (!deleteRec(f)) op.errors++;
+                                  Vault.Item it = v.find(f.getName());
+                                  if (it != null && Vault.items().equals(f.getParentFile())) {
+                                      v.list.remove(it);
+                                      v.save();
+                                  }
+                              }
+                              op.msg = fs.size() + " élément(s) supprimé(s)";
+                          }, null))
+                          .setNegativeButton("Annuler", null).show();
+              }
+
+              void vaultShare(ArrayList<File> fs) {
+                  ArrayList<Uri> us = new ArrayList<>();
+                  String mime = null;
+                  for (File f : fs) {
+                      if (!f.isFile()) continue;
+                      String n = vaultName(f);
+                      us.add(FilesProvider.uriFor(f, n));
+                      String m = mimeOf(new File(n));
+                      mime = mime == null ? m : (mime.equals(m) ? mime : "*/*");
+                  }
+                  if (us.isEmpty()) {
+                      toast("Sélectionnez des fichiers (les dossiers ne se partagent pas)");
+                      return;
+                  }
+                  Intent i;
+                  if (us.size() == 1) {
+                      i = new Intent(Intent.ACTION_SEND);
+                      i.putExtra(Intent.EXTRA_STREAM, us.get(0));
+                  } else {
+                      i = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                      i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, us);
+                  }
+                  i.setType(mime);
+                  ClipData cd = ClipData.newRawUri("", us.get(0));
+                  for (int k = 1; k < us.size(); k++) cd.addItem(new ClipData.Item(us.get(k)));
+                  i.setClipData(cd);
+                  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                  vaultExternal = true;
+                  try {
+                      startActivity(Intent.createChooser(i, "Partager"));
+                  } catch (Exception e) {
+                      toast("Partage impossible");
+                  }
+              }
+
+              static String extName(String name) {
+                  int i = name.lastIndexOf('.');
+                  return i > 0 ? name.substring(i + 1).toLowerCase(Locale.ROOT) : "";
+              }
+
               // ---------------------------------------------------------------- retour vers la recherche / la catégorie
 
               static boolean inside(File dir, File base) {
@@ -6055,11 +6818,12 @@ jobs:
                           h.path.setText(f.getParent());
                       } else h.path.setVisibility(View.GONE);
                       h.icon.setText("");
-                      h.icon.setBackground(new FileIcon(dir, ext(f), dark));
+                      String shownName = displayName(f);
+                      h.icon.setBackground(new FileIcon(dir, extName(shownName), dark));
                       h.thumb.setTag(key);
                       h.thumb.setImageDrawable(null);
                       h.thumb.setVisibility(View.GONE);
-                      String e = ext(f);
+                      String e = extName(shownName);
                       if (!dir && (IMG.contains(e) || VID.contains(e))) {
                           Bitmap b = thumbs.get(key);
                           if (b != null) {
@@ -6406,6 +7170,224 @@ jobs:
                   }
                   s.dirs = dirs.toArray(new String[0]);
                   return s;
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/Vault.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.os.Environment;
+
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileOutputStream;
+          import java.io.IOException;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.nio.charset.StandardCharsets;
+          import java.security.MessageDigest;
+          import java.security.SecureRandom;
+          import java.util.ArrayList;
+          import java.util.Base64;
+          import java.util.UUID;
+
+          import javax.crypto.SecretKeyFactory;
+          import javax.crypto.spec.PBEKeySpec;
+
+          /**
+           * Coffre-fort « Vie privée ».
+           * Les éléments sont déplacés dans un dossier caché (.FichiersProCoffre, avec .nomedia),
+           * renommés avec un identifiant sans extension : la galerie et les autres applis ne les affichent plus,
+           * et Fichiers Pro ne les montre plus en dehors du coffre.
+           * Le code (PIN ou mot de passe) n'est jamais stocké : seule son empreinte salée (PBKDF2) l'est.
+           * Elle est enregistrée dans le coffre lui-même, pour qu'effacer les données de l'appli ne suffise pas à l'ouvrir.
+           */
+          final class Vault {
+
+              static final class Item {
+                  String id, name, orig;
+                  boolean dir;
+                  long size, mtime, added;
+
+                  File file() {
+                      return new File(items(), id);
+                  }
+              }
+
+              String type = "pin";
+              String salt, hash, question, qsalt, qhash;
+              final ArrayList<Item> list = new ArrayList<>();
+
+              static File root() {
+                  return new File(Environment.getExternalStorageDirectory(), ".FichiersProCoffre");
+              }
+
+              static File items() {
+                  return new File(root(), "items");
+              }
+
+              static File meta() {
+                  return new File(root(), "vault.json");
+              }
+
+              boolean configured() {
+                  return hash != null && salt != null;
+              }
+
+              static Vault load() {
+                  Vault v = new Vault();
+                  File m = meta();
+                  if (!m.isFile()) return v;
+                  try (InputStream in = new FileInputStream(m)) {
+                      ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                      byte[] buf = new byte[16384];
+                      int n;
+                      while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+                      JSONObject o = new JSONObject(new String(bo.toByteArray(), StandardCharsets.UTF_8));
+                      v.type = o.optString("type", "pin");
+                      v.salt = o.optString("salt", null);
+                      v.hash = o.optString("hash", null);
+                      v.question = o.optString("q", null);
+                      v.qsalt = o.optString("qsalt", null);
+                      v.qhash = o.optString("qhash", null);
+                      JSONArray a = o.optJSONArray("items");
+                      if (a != null) {
+                          for (int i = 0; i < a.length(); i++) {
+                              JSONObject x = a.getJSONObject(i);
+                              Item it = new Item();
+                              it.id = x.getString("id");
+                              it.name = x.optString("name", it.id);
+                              it.orig = x.optString("orig", "");
+                              it.dir = x.optBoolean("dir", false);
+                              it.size = x.optLong("size", 0);
+                              it.mtime = x.optLong("mtime", 0);
+                              it.added = x.optLong("added", 0);
+                              if (it.file().exists()) v.list.add(it);
+                          }
+                      }
+                  } catch (Exception ignored) {
+                  }
+                  return v;
+              }
+
+              void ensureDirs() throws IOException {
+                  File r = root(), it = items();
+                  if (!it.exists() && !it.mkdirs()) throw new IOException("Impossible de créer le coffre");
+                  for (File d : new File[]{r, it}) {
+                      File nm = new File(d, ".nomedia");
+                      if (!nm.exists()) nm.createNewFile();
+                  }
+              }
+
+              synchronized void save() throws IOException {
+                  ensureDirs();
+                  try {
+                      JSONObject o = new JSONObject();
+                      o.put("v", 1);
+                      o.put("type", type);
+                      o.put("salt", salt);
+                      o.put("hash", hash);
+                      if (question != null) o.put("q", question);
+                      if (qsalt != null) o.put("qsalt", qsalt);
+                      if (qhash != null) o.put("qhash", qhash);
+                      JSONArray a = new JSONArray();
+                      for (Item it : list) {
+                          JSONObject x = new JSONObject();
+                          x.put("id", it.id);
+                          x.put("name", it.name);
+                          x.put("orig", it.orig);
+                          x.put("dir", it.dir);
+                          x.put("size", it.size);
+                          x.put("mtime", it.mtime);
+                          x.put("added", it.added);
+                          a.put(x);
+                      }
+                      o.put("items", a);
+                      File tmp = new File(root(), "vault.json.tmp");
+                      try (OutputStream out = new FileOutputStream(tmp)) {
+                          out.write(o.toString().getBytes(StandardCharsets.UTF_8));
+                      }
+                      File m = meta();
+                      if (!tmp.renameTo(m)) {
+                          m.delete();
+                          if (!tmp.renameTo(m)) throw new IOException("Enregistrement du coffre impossible");
+                      }
+                  } catch (org.json.JSONException e) {
+                      throw new IOException(e.getMessage());
+                  }
+              }
+
+              // ------------------------------------------------------------ code secret
+
+              private static String newSalt() {
+                  byte[] s = new byte[16];
+                  new SecureRandom().nextBytes(s);
+                  return Base64.getEncoder().encodeToString(s);
+              }
+
+              static String digest(String secret, String salt) {
+                  try {
+                      PBEKeySpec spec = new PBEKeySpec(secret.toCharArray(), Base64.getDecoder().decode(salt), 10000, 256);
+                      byte[] k = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).getEncoded();
+                      return Base64.getEncoder().encodeToString(k);
+                  } catch (Exception e) {
+                      try {
+                          MessageDigest md = MessageDigest.getInstance("SHA-256");
+                          byte[] h = (salt + ":" + secret).getBytes(StandardCharsets.UTF_8);
+                          for (int i = 0; i < 10000; i++) h = md.digest(h);
+                          return Base64.getEncoder().encodeToString(h);
+                      } catch (Exception e2) {
+                          return null;
+                      }
+                  }
+              }
+
+              private static boolean same(String a, String b) {
+                  if (a == null || b == null) return false;
+                  return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+              }
+
+              static String normAnswer(String a) {
+                  return Norm.of(a.trim()).replaceAll("\\s+", " ");
+              }
+
+              void setSecret(String type, String secret, String question, String answer) {
+                  this.type = type;
+                  salt = newSalt();
+                  hash = digest(secret, salt);
+                  if (question != null && answer != null && !answer.trim().isEmpty()) {
+                      this.question = question.trim();
+                      qsalt = newSalt();
+                      qhash = digest(normAnswer(answer), qsalt);
+                  }
+              }
+
+              boolean check(String secret) {
+                  return configured() && same(digest(secret, salt), hash);
+              }
+
+              boolean checkAnswer(String answer) {
+                  return qhash != null && same(digest(normAnswer(answer), qsalt), qhash);
+              }
+
+              Item find(String id) {
+                  for (Item it : list) if (it.id.equals(id)) return it;
+                  return null;
+              }
+
+              static String newId() {
+                  return UUID.randomUUID().toString().replace("-", "");
+              }
+
+              long totalSize() {
+                  long t = 0;
+                  for (Item it : list) t += it.size;
+                  return t;
               }
           }
           FIN_DU_FICHIER
