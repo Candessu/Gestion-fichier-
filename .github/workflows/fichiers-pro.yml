@@ -1,4 +1,4 @@
-# Fichiers Pro 2.1 — gestionnaire de fichiers Android (APK native)
+# Fichiers Pro 2.2 — gestionnaire de fichiers Android (APK native)
 # Mettre ce fichier dans GitHub : .github/workflows/fichiers-pro.yml
 # Puis : onglet Actions > "Construire Fichiers Pro" > Run workflow.
 # L'APK se télécharge dans l'onglet Actions > dernier build > Artifacts.
@@ -60,8 +60,8 @@ jobs:
                   applicationId 'com.fichierspro.app'
                   minSdk 26
                   targetSdk 34
-                  versionCode 3
-                  versionName '2.1'
+                  versionCode 4
+                  versionName '2.2'
               }
               signingConfigs {
                   release {
@@ -997,18 +997,29 @@ jobs:
 
               // ------------------------------------------------------------ lectures
 
-              private static String cond(int kind, boolean hidden) {
+              private static String cond(int kind, boolean hidden, String scope) {
                   String c = kind == BIG ? "isdir=0 AND size>" + BIG_MIN : "cat=" + kind + " AND isdir=0";
-                  return hidden ? c : c + " AND hidden=0";
+                  if (!hidden) c += " AND hidden=0";
+                  if (scope != null) c += " AND path >= ? AND path < ?";
+                  return c;
+              }
+
+              private static String[] scopeArgs(String scope) {
+                  return scope == null ? null : new String[]{scope + "/", scope + "0"};
               }
 
               /** Une page de la catégorie (limit = -1 : tout le reste). */
               ArrayList<IFile> list(int kind, boolean hidden, int limit, int offset) {
+                  return list(kind, hidden, limit, offset, null);
+              }
+
+              /** Idem, limité à un dossier et ses sous-dossiers (scope = chemin du dossier, ou null). */
+              ArrayList<IFile> list(int kind, boolean hidden, int limit, int offset, String scope) {
                   ArrayList<IFile> out = new ArrayList<>();
                   try {
-                      Cursor c = getReadableDatabase().rawQuery("SELECT path,size,mtime FROM files WHERE " + cond(kind, hidden)
+                      Cursor c = getReadableDatabase().rawQuery("SELECT path,size,mtime FROM files WHERE " + cond(kind, hidden, scope)
                               + " ORDER BY " + (kind == BIG ? "size DESC" : "mtime DESC")
-                              + " LIMIT " + limit + " OFFSET " + offset, null);
+                              + " LIMIT " + limit + " OFFSET " + offset, scopeArgs(scope));
                       try {
                           while (c.moveToNext()) out.add(new IFile(c.getString(0), false, c.getLong(1), c.getLong(2)));
                       } finally {
@@ -1021,10 +1032,14 @@ jobs:
 
               /** {nombre, taille totale} */
               long[] stats(int kind, boolean hidden) {
+                  return stats(kind, hidden, null);
+              }
+
+              long[] stats(int kind, boolean hidden, String scope) {
                   long[] r = new long[2];
                   try {
                       Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*),SUM(size) FROM files WHERE "
-                              + cond(kind, hidden), null);
+                              + cond(kind, hidden, scope), scopeArgs(scope));
                       try {
                           if (c.moveToFirst()) {
                               r[0] = c.getLong(0);
@@ -1038,27 +1053,66 @@ jobs:
                   return r;
               }
 
-              /** [0] = gros fichiers, [1..6] = catégories ; chaque ligne {nombre, taille}. */
+              /** [0] = gros fichiers, [1..6] = catégories, [7] = autres fichiers ; chaque ligne {nombre, taille}. */
               long[][] allStats(boolean hidden) {
-                  long[][] r = new long[7][2];
+                  return allStats(hidden, null);
+              }
+
+              long[][] allStats(boolean hidden, String scope) {
+                  long[][] r = new long[8][2];
                   try {
                       Cursor c = getReadableDatabase().rawQuery("SELECT cat,COUNT(*),SUM(size) FROM files WHERE isdir=0"
-                              + (hidden ? "" : " AND hidden=0") + " GROUP BY cat", null);
+                              + (hidden ? "" : " AND hidden=0") + (scope != null ? " AND path >= ? AND path < ?" : "")
+                              + " GROUP BY cat", scopeArgs(scope));
                       try {
                           while (c.moveToNext()) {
                               int k = c.getInt(0);
-                              if (k >= 1 && k <= 6) {
-                                  r[k][0] = c.getLong(1);
-                                  r[k][1] = c.isNull(2) ? 0 : c.getLong(2);
-                              }
+                              int slot = k >= 1 && k <= 6 ? k : 7;
+                              r[slot][0] += c.getLong(1);
+                              r[slot][1] += c.isNull(2) ? 0 : c.getLong(2);
                           }
                       } finally {
                           c.close();
                       }
                   } catch (Throwable ignored) {
                   }
-                  r[0] = stats(BIG, hidden);
+                  r[0] = stats(BIG, hidden, scope);
                   return r;
+              }
+
+              /** Taille d'un élément direct d'un dossier, sous-dossiers compris. */
+              static final class Child {
+                  String name;
+                  long size, count;
+                  boolean folder;
+              }
+
+              /** Contenu direct d'un dossier, trié du plus gros au plus petit (tous fichiers, cachés compris). */
+              ArrayList<Child> childSizes(String dir) {
+                  ArrayList<Child> out = new ArrayList<>();
+                  try {
+                      Cursor c = getReadableDatabase().rawQuery(
+                              "SELECT CASE WHEN instr(rel,'/')>0 THEN substr(rel,1,instr(rel,'/')-1) ELSE rel END AS top,"
+                                      + " SUM(size), COUNT(*), MAX(instr(rel,'/')>0)"
+                                      + " FROM (SELECT substr(path, length(?)+2) AS rel, size FROM files"
+                                      + " WHERE isdir=0 AND path >= ? AND path < ?)"
+                                      + " GROUP BY top ORDER BY 2 DESC",
+                              new String[]{dir, dir + "/", dir + "0"});
+                      try {
+                          while (c.moveToNext()) {
+                              Child ch = new Child();
+                              ch.name = c.getString(0);
+                              ch.size = c.isNull(1) ? 0 : c.getLong(1);
+                              ch.count = c.getLong(2);
+                              ch.folder = c.getInt(3) != 0;
+                              out.add(ch);
+                          }
+                      } finally {
+                          c.close();
+                      }
+                  } catch (Throwable ignored) {
+                  }
+                  return out;
               }
 
               /** Instantané en mémoire pour la recherche ; rechargé seulement si l'index a changé. */
@@ -1884,7 +1938,7 @@ jobs:
 
           public class MainActivity extends Activity {
 
-              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4;
+              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4, M_ANALYSIS = 5;
 
               static final Set<String> IMG = set("jpg jpeg png gif bmp webp heic heif");
               static final Set<String> VID = set("mp4 mkv avi mov 3gp webm flv wmv m4v ts");
@@ -1922,11 +1976,15 @@ jobs:
               HorizontalScrollView typeScroll;
               LinearLayout typeChips;
               TextView searchInfo;
-              ReturnState back;
+              ReturnState back, listBack;
+              String listScope;
+              TextView usageChip;
 
               /** Écran à retrouver avec le bouton Retour (résultats de recherche ou liste de catégorie). */
               static final class ReturnState {
                   int mode, kind, pos, top;
+                  String scope;
+                  File anaDir, anaRoot, anaReturn;
                   String title, sub, query, status;
                   ArrayList<File> items;
                   File prevDir, searchHome, searchScope, entry;
@@ -2048,6 +2106,16 @@ jobs:
                       File parent = currentDir.getParentFile();
                       if (currentDir.equals(r) || parent == null) showHome();
                       else browse(parent, currentDir);
+                      return;
+                  }
+                  if (mode == M_ANALYSIS) {
+                      anaBack();
+                      return;
+                  }
+                  if (mode == M_LIST && listBack != null) {
+                      ReturnState st = listBack;
+                      listBack = null;
+                      restoreAna(st);
                       return;
                   }
                   if (mode == M_LIST || mode == M_TRASH || mode == M_SEARCH) {
@@ -2407,7 +2475,22 @@ jobs:
                   crumbs.setGravity(Gravity.CENTER_VERTICAL);
                   crumbs.setPadding(dp(8), dp(4), dp(8), dp(4));
                   crumbScroll.addView(crumbs);
-                  root.addView(crumbScroll, new LinearLayout.LayoutParams(-1, -2));
+                  LinearLayout crumbRow = new LinearLayout(this);
+                  crumbRow.setOrientation(LinearLayout.HORIZONTAL);
+                  crumbRow.setGravity(Gravity.CENTER_VERTICAL);
+                  crumbRow.setBackgroundColor(cCard);
+                  crumbRow.addView(crumbScroll, new LinearLayout.LayoutParams(0, -2, 1));
+                  usageChip = text("", 12, hi(), true);
+                  usageChip.setSingleLine(true);
+                  usageChip.setPadding(dp(10), dp(5), dp(10), dp(5));
+                  GradientDrawable ub = round(Color.TRANSPARENT, 14);
+                  ub.setStroke(dp(1), hi());
+                  usageChip.setBackground(ub);
+                  usageChip.setVisibility(View.GONE);
+                  LinearLayout.LayoutParams ulp = new LinearLayout.LayoutParams(-2, -2);
+                  ulp.setMargins(dp(6), 0, dp(10), 0);
+                  crumbRow.addView(usageChip, ulp);
+                  root.addView(crumbRow, new LinearLayout.LayoutParams(-1, -2));
 
                   typeScroll = new HorizontalScrollView(this);
                   typeScroll.setHorizontalScrollBarEnabled(false);
@@ -2544,6 +2627,7 @@ jobs:
                       if (mode != M_PERM) topActions.addView(iconBtn("⋮", this::mainMenu));
                   }
                   updateBottom();
+                  updateUsageChip();
               }
 
               TextView bottomBtn(String icon, String label, View.OnClickListener l) {
@@ -2593,6 +2677,7 @@ jobs:
               void showHome() {
                   ensureIndex();
                   back = null;
+                  listBack = null;
                   mode = M_HOME;
                   scanGen++;
                   selected.clear();
@@ -2752,7 +2837,7 @@ jobs:
                   c.setBackground(round(cCard, 18));
                   c.setForeground(ripple(false));
                   c.setElevation(dp(1));
-                  c.setOnClickListener(v -> browse(r, null));
+                  c.setOnClickListener(v -> showAnalysis(r, null));
                   long total = 0, free = 0;
                   try {
                       StatFs s = new StatFs(r.getPath());
@@ -2775,6 +2860,28 @@ jobs:
                   lp.setMargins(0, dp(10), 0, dp(8));
                   c.addView(pb, lp);
                   c.addView(text(fmtSize(used) + " utilisés sur " + fmtSize(total) + "   •   " + fmtSize(free) + " libres", 13, cSub, false));
+                  LinearLayout acts = new LinearLayout(this);
+                  acts.setOrientation(LinearLayout.HORIZONTAL);
+                  acts.setPadding(0, dp(10), 0, 0);
+                  TextView an = text("📊  Analyser", 13, Color.WHITE, true);
+                  an.setGravity(Gravity.CENTER);
+                  an.setPadding(dp(12), dp(9), dp(12), dp(9));
+                  an.setBackground(round(cPrimary, 18));
+                  an.setOnClickListener(v -> showAnalysis(r, null));
+                  TextView br = text("📂  Parcourir", 13, hi(), true);
+                  br.setGravity(Gravity.CENTER);
+                  br.setPadding(dp(12), dp(9), dp(12), dp(9));
+                  GradientDrawable bb = round(Color.TRANSPARENT, 18);
+                  bb.setStroke(dp(1), hi());
+                  br.setBackground(bb);
+                  br.setOnClickListener(v -> browse(r, null));
+                  LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(0, -2, 1);
+                  alp.setMargins(0, 0, dp(6), 0);
+                  acts.addView(an, alp);
+                  LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(0, -2, 1);
+                  blp.setMargins(dp(6), 0, 0, 0);
+                  acts.addView(br, blp);
+                  c.addView(acts);
                   LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2);
                   cl.setMargins(0, 0, 0, dp(10));
                   c.setLayoutParams(cl);
@@ -2941,6 +3048,8 @@ jobs:
                   if (isFinishing() || index == null) return;
                   if (mode == M_HOME) {
                       updateTileStats();
+                  } else if (mode == M_ANALYSIS) {
+                      if (!index.syncing || SystemClock.uptimeMillis() - anaLastLoad > 4000) refresh();
                   } else if (mode == M_LIST) {
                       if (selected.isEmpty()) loadList(true);
                   } else if (mode == M_SEARCH) {
@@ -2980,8 +3089,14 @@ jobs:
               }
 
               void showCategory(String title, int kind) {
+                  showCategoryIn(title, kind, null);
+              }
+
+              void showCategoryIn(String title, int kind, String scope) {
                   ensureIndex();
                   back = null;
+                  listBack = null;
+                  listScope = scope;
                   mode = M_LIST;
                   listKind = kind;
                   selected.clear();
@@ -2997,14 +3112,15 @@ jobs:
               void loadList(final boolean keepPos) {
                   final int gen = ++scanGen;
                   final int kind = listKind;
+                  final String scope = listScope;
                   final boolean hidden = showHidden();
                   final int pos = listView.getFirstVisiblePosition();
                   View v0 = listView.getChildAt(0);
                   final int top = v0 == null ? 0 : v0.getTop() - listView.getPaddingTop();
                   final int cap = kind == FileIndex.BIG ? 500 : -1;
                   bg.execute(() -> {
-                      final ArrayList<IFile> first = index.list(kind, hidden, keepPos ? cap : 300, 0);
-                      final long[] st = index.stats(kind, hidden);
+                      final ArrayList<IFile> first = index.list(kind, hidden, keepPos ? cap : 300, 0, scope);
+                      final long[] st = index.stats(kind, hidden, scope);
                       ui.post(() -> {
                           if (gen != scanGen || mode != M_LIST) return;
                           if (keepPos && !selected.isEmpty()) return;
@@ -3023,7 +3139,7 @@ jobs:
                           updateEmpty();
                       });
                       if (!keepPos && first.size() == 300) {
-                          final ArrayList<IFile> rest = index.list(kind, hidden, kind == FileIndex.BIG ? 200 : -1, 300);
+                          final ArrayList<IFile> rest = index.list(kind, hidden, kind == FileIndex.BIG ? 200 : -1, 300, scope);
                           ui.post(() -> {
                               if (gen != scanGen || mode != M_LIST || rest.isEmpty()) return;
                               items.addAll(rest);
@@ -3060,6 +3176,7 @@ jobs:
               void openSearch() {
                   ensureIndex();
                   back = null;
+                  listBack = null;
                   searchHome = mode == M_BROWSE ? currentDir : null;
                   searchScope = searchHome;
                   prevDir = searchHome;
@@ -3441,6 +3558,7 @@ jobs:
 
               void showTrash() {
                   back = null;
+                  listBack = null;
                   mode = M_TRASH;
                   selected.clear();
                   subText = "Appuyez sur un élément pour le restaurer";
@@ -3483,6 +3601,9 @@ jobs:
                           break;
                       case M_HOME:
                           showHome();
+                          break;
+                      case M_ANALYSIS:
+                          loadAnalysis(anaScroll != null ? anaScroll.getScrollY() : 0);
                           break;
                   }
               }
@@ -3604,7 +3725,14 @@ jobs:
                       m.add(0, 20, 0, "♻  Tout restaurer");
                       m.add(0, 21, 1, "🗑  Vider la corbeille");
                   }
+                  if (mode == M_ANALYSIS) {
+                      m.add(0, 60, 0, "📂  Ouvrir ce dossier");
+                      m.add(0, 6, 1, "🔄  Actualiser");
+                      m.add(0, 40, 2, "🔄  Réindexer le stockage");
+                      m.add(0, 8, 3, "🏠  Accueil");
+                  }
                   if (mode == M_HOME) {
+                      m.add(0, 62, 0, "📊  Analyse du stockage");
                       m.add(0, 30, 0, "🗂  Explorer la racine ( / )");
                       m.add(0, 40, 1, "🔄  Réindexer le stockage");
                       if (!recents().isEmpty()) m.add(0, 41, 2, "🕘  Effacer les fichiers récents");
@@ -3661,6 +3789,12 @@ jobs:
                           case 41:
                               confirmClearRecents();
                               break;
+                          case 60:
+                              anaOpenFolder(anaDir, null);
+                              break;
+                          case 62:
+                              showAnalysis(internalRoot(), null);
+                              break;
                           case 50:
                               iopts.caseSens = !iopts.caseSens;
                               searchOptsChanged();
@@ -3707,9 +3841,9 @@ jobs:
                               browse(new File("/"), null);
                               break;
                           case 31:
-                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.1")
+                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.2")
                                       .setMessage("Gestionnaire de fichiers complet :\n\n• Explorer, copier, couper, coller\n• Corbeille avec restauration\n"
-                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Catégories et gros fichiers indexés\n"
+                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Analyse du stockage en 1 clic (dossiers, types, gros fichiers)\n• Catégories et gros fichiers indexés\n"
                                               + "• Miniatures photos et vidéos\n• Éditeur de texte intégré\n• Favoris, récents, MD5, thème sombre")
                                       .setPositiveButton("OK", null).show();
                               break;
@@ -4480,6 +4614,485 @@ jobs:
 
               // ---------------------------------------------------------------- adaptateur
 
+              // ---------------------------------------------------------------- analyse du stockage (tout sur un écran)
+
+              static final int[] CAT_COLORS = {0, 0xFF43A047, 0xFFE53935, 0xFF8E24AA, 0xFF1E88E5, 0xFF7CB342, 0xFFF9A825, 0xFF90A4AE};
+              static final String[] CAT_NAMES = {"", "Images", "Vidéos", "Audio", "Documents", "APK", "Archives", "Autres fichiers"};
+
+              File anaDir, anaRoot, anaReturn;
+              ScrollView anaScroll;
+              LinearLayout anaCol;
+              long anaLastLoad;
+              final HashMap<String, Integer> anaScrollMem = new HashMap<>();
+
+              static final class AnaData {
+                  long total, free;
+                  long[][] cats;
+                  ArrayList<FileIndex.Child> kids;
+                  ArrayList<IFile> big;
+                  long[] bigStats;
+                  long trash, dirTotal, dirCount;
+              }
+
+              /** Point d'entrée : un appui sur le pourcentage de stockage. */
+              void showAnalysis(File dir, File returnTo) {
+                  ensureIndex();
+                  back = null;
+                  listBack = null;
+                  anaRoot = rootOf(dir);
+                  anaReturn = returnTo;
+                  anaScrollMem.clear();
+                  showAnalysisDir(dir, 0);
+              }
+
+              void showAnalysisDir(File dir, int scrollY) {
+                  mode = M_ANALYSIS;
+                  anaDir = dir;
+                  selected.clear();
+                  scanGen++;
+                  boolean root = dir.equals(anaRoot);
+                  listTitle = root ? "Analyse du stockage" : dir.getName();
+                  subText = root ? (anaRoot.equals(internalRoot()) ? "Stockage interne" : "Carte SD / USB") : "Calcul…";
+                  btnBack.setVisibility(View.VISIBLE);
+                  crumbScroll.setVisibility(View.VISIBLE);
+                  buildAnaCrumbs();
+                  anaScroll = new ScrollView(this);
+                  anaCol = new LinearLayout(this);
+                  anaCol.setOrientation(LinearLayout.VERTICAL);
+                  anaCol.setPadding(dp(12), dp(12), dp(12), dp(28));
+                  anaScroll.addView(anaCol);
+                  content.removeAllViews();
+                  content.addView(anaScroll, new FrameLayout.LayoutParams(-1, -1));
+                  ProgressBar pb = new ProgressBar(this);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
+                  lp.gravity = Gravity.CENTER_HORIZONTAL;
+                  lp.topMargin = dp(60);
+                  anaCol.addView(pb, lp);
+                  updateHeader();
+                  loadAnalysis(scrollY);
+              }
+
+              void buildAnaCrumbs() {
+                  crumbs.removeAllViews();
+                  ArrayList<File> chain = new ArrayList<>();
+                  for (File f = anaDir; f != null; f = f.getParentFile()) {
+                      chain.add(0, f);
+                      if (f.equals(anaRoot)) break;
+                  }
+                  for (int i = 0; i < chain.size(); i++) {
+                      final File f = chain.get(i);
+                      boolean last = i == chain.size() - 1;
+                      String name = i == 0 ? (f.equals(internalRoot()) ? "📊 Interne" : "📊 " + f.getName()) : f.getName();
+                      TextView t = text(name, 13, last ? hi() : cSub, last);
+                      t.setPadding(dp(8), dp(6), dp(8), dp(6));
+                      t.setBackground(ripple(false));
+                      t.setOnClickListener(v -> {
+                          if (!f.equals(anaDir)) showAnalysisDir(f, memScroll(f));
+                      });
+                      crumbs.addView(t);
+                      if (!last) crumbs.addView(text("›", 15, cSub, false));
+                  }
+                  crumbScroll.post(() -> crumbScroll.fullScroll(View.FOCUS_RIGHT));
+              }
+
+              int memScroll(File f) {
+                  Integer y = anaScrollMem.get(f.getAbsolutePath());
+                  return y == null ? 0 : y;
+              }
+
+              void anaInto(File child) {
+                  if (anaScroll != null) anaScrollMem.put(anaDir.getAbsolutePath(), anaScroll.getScrollY());
+                  showAnalysisDir(child, 0);
+              }
+
+              void anaBack() {
+                  if (anaDir != null && !anaDir.equals(anaRoot) && anaDir.getParentFile() != null) {
+                      File p = anaDir.getParentFile();
+                      showAnalysisDir(p, memScroll(p));
+                  } else if (anaReturn != null) {
+                      File r = anaReturn;
+                      anaReturn = null;
+                      browse(r, null);
+                  } else showHome();
+              }
+
+              void loadAnalysis(final int restoreY) {
+                  final int gen = ++scanGen;
+                  final File dir = anaDir;
+                  final String scope = dir.getAbsolutePath();
+                  final boolean root = dir.equals(anaRoot);
+                  final boolean hidden = showHidden();
+                  final boolean internal = anaRoot.equals(internalRoot());
+                  anaLastLoad = SystemClock.uptimeMillis();
+                  bg.execute(() -> {
+                      final AnaData d = new AnaData();
+                      try {
+                          StatFs s = new StatFs(anaRoot.getPath());
+                          d.total = s.getTotalBytes();
+                          d.free = s.getAvailableBytes();
+                      } catch (Exception ignored) {
+                      }
+                      d.cats = index.allStats(hidden, scope);
+                      d.kids = index.childSizes(scope);
+                      d.big = index.list(FileIndex.BIG, hidden, 3, 0, scope);
+                      d.bigStats = d.cats[0];
+                      for (FileIndex.Child c : d.kids) {
+                          d.dirTotal += c.size;
+                          d.dirCount += c.count;
+                      }
+                      if (root && internal) d.trash = sizeRec(trashDir());
+                      ui.post(() -> {
+                          if (gen != scanGen || mode != M_ANALYSIS || !dir.equals(anaDir)) return;
+                          renderAnalysis(d, root);
+                          anaScroll.post(() -> anaScroll.scrollTo(0, restoreY));
+                      });
+                  });
+              }
+
+              LinearLayout anaCard() {
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setBackground(round(cCard, 18));
+                  c.setElevation(dp(1));
+                  c.setClipToOutline(true);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                  lp.setMargins(0, 0, 0, dp(12));
+                  c.setLayoutParams(lp);
+                  return c;
+              }
+
+              View anaHead(String title, String right, View.OnClickListener rightClick) {
+                  LinearLayout h = new LinearLayout(this);
+                  h.setGravity(Gravity.CENTER_VERTICAL);
+                  h.setPadding(dp(16), dp(14), dp(10), dp(6));
+                  h.addView(text(title, 16, cText, true), new LinearLayout.LayoutParams(0, -2, 1));
+                  if (right != null) {
+                      TextView r = text(right, 13, hi(), true);
+                      r.setPadding(dp(8), dp(4), dp(8), dp(4));
+                      if (rightClick != null) {
+                          r.setBackground(ripple(true));
+                          r.setOnClickListener(rightClick);
+                      }
+                      h.addView(r);
+                  }
+                  return h;
+              }
+
+              /** Barre empilée : chaque segment proportionnel à sa taille. */
+              View stackBar(long[] sizes, int[] colors) {
+                  LinearLayout bar = new LinearLayout(this);
+                  bar.setOrientation(LinearLayout.HORIZONTAL);
+                  bar.setBackground(round(cDivider, 6));
+                  bar.setClipToOutline(true);
+                  long sum = 0;
+                  for (long v : sizes) sum += Math.max(0, v);
+                  for (int i = 0; i < sizes.length; i++) {
+                      if (sizes[i] <= 0 || sum == 0) continue;
+                      View seg = new View(this);
+                      seg.setBackgroundColor(colors[i]);
+                      bar.addView(seg, new LinearLayout.LayoutParams(0, -1, (float) ((double) sizes[i] / sum)));
+                  }
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(14));
+                  lp.setMargins(dp(16), dp(10), dp(16), dp(6));
+                  bar.setLayoutParams(lp);
+                  return bar;
+              }
+
+              View legendRow(int color, String name, long size, String pct, View.OnClickListener l) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setGravity(Gravity.CENTER_VERTICAL);
+                  r.setPadding(dp(16), dp(9), dp(16), dp(9));
+                  if (l != null) {
+                      r.setBackground(ripple(false));
+                      r.setOnClickListener(l);
+                  }
+                  View dot = new View(this);
+                  GradientDrawable g = new GradientDrawable();
+                  g.setShape(GradientDrawable.OVAL);
+                  g.setColor(color);
+                  dot.setBackground(g);
+                  r.addView(dot, new LinearLayout.LayoutParams(dp(12), dp(12)));
+                  TextView n = text(name, 14, cText, false);
+                  n.setPadding(dp(12), 0, 0, 0);
+                  r.addView(n, new LinearLayout.LayoutParams(0, -2, 1));
+                  if (pct != null) {
+                      TextView p = text(pct, 12, cSub, false);
+                      p.setPadding(0, 0, dp(12), 0);
+                      r.addView(p);
+                  }
+                  r.addView(text(fmtSize(size), 14, cText, true));
+                  if (l != null) r.addView(text("  ›", 14, cSub, false));
+                  return r;
+              }
+
+              static String pct(long part, long whole) {
+                  if (whole <= 0) return "";
+                  double p = part * 100.0 / whole;
+                  return String.format(Locale.FRANCE, p < 10 ? "%.1f %%" : "%.0f %%", p);
+              }
+
+              void renderAnalysis(final AnaData d, final boolean root) {
+                  anaCol.removeAllViews();
+                  long used = d.total - d.free;
+                  if (index.syncing) {
+                      TextView note = text("⏳  Indexation en cours : les tailles se complètent automatiquement.", 13, cSub, false);
+                      note.setPadding(dp(6), 0, dp(6), dp(10));
+                      anaCol.addView(note);
+                  }
+                  final String scope = anaDir.getAbsolutePath();
+                  final String where = root ? "" : " — " + anaDir.getName();
+
+                  // ---- carte 1 : occupation + répartition par type
+                  LinearLayout c1 = anaCard();
+                  long catSum = 0;
+                  for (int k = 1; k <= 7; k++) catSum += d.cats[k][1];
+                  if (root) {
+                      int p = d.total > 0 ? (int) Math.round(used * 100.0 / d.total) : 0;
+                      LinearLayout h = new LinearLayout(this);
+                      h.setGravity(Gravity.CENTER_VERTICAL);
+                      h.setPadding(dp(16), dp(16), dp(16), 0);
+                      LinearLayout tc = new LinearLayout(this);
+                      tc.setOrientation(LinearLayout.VERTICAL);
+                      tc.addView(text(anaRoot.equals(internalRoot()) ? "💾  Stockage interne" : "💽  Carte SD / USB", 16, cText, true));
+                      tc.addView(text(fmtSize(used) + " utilisés sur " + fmtSize(d.total) + "  •  " + fmtSize(d.free) + " libres", 12, cSub, false));
+                      h.addView(tc, new LinearLayout.LayoutParams(0, -2, 1));
+                      h.addView(text(p + " %", 30, p > 90 ? 0xFFE53935 : hi(), true));
+                      c1.addView(h);
+                      long sys = Math.max(0, used - catSum - d.trash);
+                      long[] sizes = new long[10];
+                      int[] cols = new int[10];
+                      for (int k = 1; k <= 7; k++) {
+                          sizes[k - 1] = d.cats[k][1];
+                          cols[k - 1] = CAT_COLORS[k];
+                      }
+                      sizes[7] = d.trash;
+                      cols[7] = 0xFF8D6E63;
+                      sizes[8] = sys;
+                      cols[8] = 0xFF546E7A;
+                      sizes[9] = d.free;
+                      cols[9] = cDivider;
+                      c1.addView(stackBar(sizes, cols));
+                  } else {
+                      LinearLayout h = new LinearLayout(this);
+                      h.setGravity(Gravity.CENTER_VERTICAL);
+                      h.setPadding(dp(16), dp(16), dp(16), 0);
+                      LinearLayout tc = new LinearLayout(this);
+                      tc.setOrientation(LinearLayout.VERTICAL);
+                      tc.addView(text("📁  " + anaDir.getName(), 16, cText, true));
+                      tc.addView(text(fmtCount(d.dirCount) + " fichier(s)  •  " + pct(d.dirTotal, used) + " de l'espace utilisé", 12, cSub, false));
+                      h.addView(tc, new LinearLayout.LayoutParams(0, -2, 1));
+                      h.addView(text(fmtSize(d.dirTotal), 22, hi(), true));
+                      c1.addView(h);
+                      long[] sizes = new long[7];
+                      int[] cols = new int[7];
+                      for (int k = 1; k <= 7; k++) {
+                          sizes[k - 1] = d.cats[k][1];
+                          cols[k - 1] = CAT_COLORS[k];
+                      }
+                      c1.addView(stackBar(sizes, cols));
+                  }
+                  Integer[] order = {1, 2, 3, 4, 5, 6, 7};
+                  java.util.Arrays.sort(order, (a, b) -> Long.compare(d.cats[b][1], d.cats[a][1]));
+                  long base = root ? used : d.dirTotal;
+                  for (final int k : order) {
+                      if (d.cats[k][0] == 0) continue;
+                      final String title = CAT_NAMES[k] + where;
+                      c1.addView(legendRow(CAT_COLORS[k], CAT_NAMES[k] + "  (" + fmtCount(d.cats[k][0]) + ")", d.cats[k][1],
+                              pct(d.cats[k][1], base), v -> showCategoryFromAna(title, k == 7 ? 0 : k, scope)));
+                  }
+                  if (root) {
+                      if (d.trash > 0) c1.addView(legendRow(0xFF8D6E63, "Corbeille", d.trash, pct(d.trash, used), v -> showTrash()));
+                      long sys = Math.max(0, used - catSum - d.trash);
+                      if (sys > 0) c1.addView(legendRow(0xFF546E7A, "Système, applications et données", sys, pct(sys, used), null));
+                      c1.addView(legendRow(cDivider, "Espace libre", d.free, pct(d.free, d.total), null));
+                  }
+                  View sp = new View(this);
+                  c1.addView(sp, new LinearLayout.LayoutParams(-1, dp(8)));
+                  anaCol.addView(c1);
+
+                  // ---- carte 2 : fichiers volumineux
+                  LinearLayout c2 = anaCard();
+                  c2.addView(anaHead("📊  Fichiers volumineux (> 10 Mo)",
+                          d.bigStats[0] > 0 ? fmtCount(d.bigStats[0]) + "  •  " + fmtSize(d.bigStats[1]) : null, null));
+                  if (d.big.isEmpty()) {
+                      TextView t = text("Aucun fichier de plus de 10 Mo ici.", 13, cSub, false);
+                      t.setPadding(dp(16), dp(4), dp(16), dp(14));
+                      c2.addView(t);
+                  } else {
+                      for (IFile f : d.big) c2.addView(anaRow(f, f.getName(), f.getParent(), f.length(), null, false));
+                      TextView all = text("Voir les " + fmtCount(d.bigStats[0]) + " fichiers volumineux   ›", 14, hi(), true);
+                      all.setPadding(dp(16), dp(13), dp(16), dp(14));
+                      all.setBackground(ripple(false));
+                      all.setOnClickListener(v -> showCategoryFromAna("Gros fichiers (> 10 Mo)" + where, FileIndex.BIG, scope));
+                      c2.addView(all);
+                  }
+                  anaCol.addView(c2);
+
+                  // ---- carte 3 : dossiers du plus gros au plus petit
+                  LinearLayout c3 = anaCard();
+                  c3.addView(anaHead(root ? "📁  Plus gros dossiers" : "📁  Contenu par taille", "📂 Ouvrir", v -> anaOpenFolder(anaDir, null)));
+                  int shown = 0;
+                  long restSize = 0, restCount = 0;
+                  long denom = root ? Math.max(used, d.dirTotal) : d.dirTotal;
+                  for (FileIndex.Child ch : d.kids) {
+                      if (shown >= 80) {
+                          restSize += ch.size;
+                          restCount++;
+                          continue;
+                      }
+                      File f = new File(anaDir, ch.name);
+                      String sub = ch.folder ? fmtCount(ch.count) + " fichier(s)  •  " + fmtSize(ch.size) : fmtSize(ch.size);
+                      c3.addView(anaRow(f, ch.name, sub, ch.size, pct(ch.size, denom), ch.folder));
+                      View bar = barLine(denom > 0 ? (float) ((double) ch.size / denom) : 0f);
+                      c3.addView(bar);
+                      shown++;
+                  }
+                  if (restCount > 0) {
+                      TextView more = text("+ " + fmtCount(restCount) + " autres éléments  •  " + fmtSize(restSize) + "   ›", 14, hi(), true);
+                      more.setPadding(dp(16), dp(13), dp(16), dp(14));
+                      more.setBackground(ripple(false));
+                      more.setOnClickListener(v -> anaOpenFolder(anaDir, null));
+                      c3.addView(more);
+                  }
+                  if (d.kids.isEmpty()) {
+                      TextView t = text(index.syncing ? "Calcul en cours…" : "Ce dossier est vide.", 13, cSub, false);
+                      t.setPadding(dp(16), dp(4), dp(16), dp(14));
+                      c3.addView(t);
+                  }
+                  anaCol.addView(c3);
+
+                  subText = root ? fmtSize(used) + " utilisés  •  " + fmtSize(d.free) + " libres"
+                          : fmtSize(d.dirTotal) + "  •  " + fmtCount(d.dirCount) + " fichier(s)";
+                  updateHeader();
+              }
+
+              View barLine(float frac) {
+                  LinearLayout b = new LinearLayout(this);
+                  b.setOrientation(LinearLayout.HORIZONTAL);
+                  View fill = new View(this);
+                  fill.setBackground(round(hi(), 2));
+                  b.addView(fill, new LinearLayout.LayoutParams(0, -1, Math.max(0.004f, frac)));
+                  b.addView(new View(this), new LinearLayout.LayoutParams(0, -1, Math.max(0f, 1f - frac)));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(4));
+                  lp.setMargins(dp(66), 0, dp(16), dp(6));
+                  b.setLayoutParams(lp);
+                  return b;
+              }
+
+              View anaRow(final File f, String name, String sub, long size, String pctText, final boolean folder) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setGravity(Gravity.CENTER_VERTICAL);
+                  r.setPadding(dp(14), dp(8), dp(16), dp(4));
+                  r.setBackground(ripple(false));
+                  View ic = new View(this);
+                  ic.setBackground(new FileIcon(folder, ext(f), dark));
+                  r.addView(ic, new LinearLayout.LayoutParams(dp(38), dp(38)));
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setPadding(dp(14), 0, dp(8), 0);
+                  TextView a = text(name, 15, cText, false);
+                  a.setSingleLine(true);
+                  a.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                  if (name.startsWith(".")) a.setAlpha(0.6f);
+                  TextView b = text(sub, 12, cSub, false);
+                  b.setSingleLine(true);
+                  b.setEllipsize(TextUtils.TruncateAt.START);
+                  c.addView(a);
+                  c.addView(b);
+                  r.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                  LinearLayout rc = new LinearLayout(this);
+                  rc.setOrientation(LinearLayout.VERTICAL);
+                  rc.setGravity(Gravity.END);
+                  rc.addView(text(pctText != null ? pctText : fmtSize(size), 14, pctText != null ? hi() : cText, true));
+                  if (folder) rc.addView(text("›", 14, cSub, false));
+                  r.addView(rc);
+                  r.setOnClickListener(v -> {
+                      if (folder) anaInto(f);
+                      else {
+                          IFile x = new IFile(f.getPath(), false, size, f.lastModified());
+                          openFile(x);
+                      }
+                  });
+                  r.setOnLongClickListener(v -> {
+                      String[] opts = folder
+                              ? new String[]{"📊  Analyser ce dossier", "📂  Ouvrir le dossier", "🗑  Mettre à la corbeille", "ℹ  Propriétés"}
+                              : new String[]{"📄  Ouvrir", "📁  Afficher dans le dossier", "🗑  Mettre à la corbeille", "ℹ  Propriétés"};
+                      new AlertDialog.Builder(this).setTitle(name).setItems(opts, (dd, w) -> {
+                          if (w == 0) {
+                              if (folder) anaInto(f);
+                              else openFile(f);
+                          } else if (w == 1) {
+                              if (folder) anaOpenFolder(f, null);
+                              else anaOpenFolder(f.getParentFile(), f);
+                          } else if (w == 2) {
+                              ArrayList<File> one = new ArrayList<>();
+                              one.add(f);
+                              moveToTrash(one);
+                          } else {
+                              ArrayList<File> one = new ArrayList<>();
+                              one.add(f);
+                              properties(one);
+                          }
+                      }).show();
+                      return true;
+                  });
+                  return r;
+              }
+
+              /** Ouvre un dossier dans l'explorateur ; Retour ramène à l'analyse. */
+              void anaOpenFolder(File dir, File focus) {
+                  if (dir == null) return;
+                  saveReturn(dir);
+                  browse(dir, focus);
+              }
+
+              void showCategoryFromAna(String title, int kind, String scope) {
+                  ReturnState st = anaState();
+                  showCategoryIn(title, kind, scope);
+                  listBack = st;
+              }
+
+              ReturnState anaState() {
+                  ReturnState st = new ReturnState();
+                  st.mode = M_ANALYSIS;
+                  st.anaDir = anaDir;
+                  st.anaRoot = anaRoot;
+                  st.anaReturn = anaReturn;
+                  st.pos = anaScroll != null ? anaScroll.getScrollY() : 0;
+                  st.items = new ArrayList<>();
+                  return st;
+              }
+
+              void restoreAna(ReturnState st) {
+                  anaRoot = st.anaRoot;
+                  anaReturn = st.anaReturn;
+                  showAnalysisDir(st.anaDir, st.pos);
+              }
+
+              void updateUsageChip() {
+                  if (usageChip == null) return;
+                  if (mode != M_BROWSE || !selected.isEmpty() || currentDir == null) {
+                      usageChip.setVisibility(View.GONE);
+                      return;
+                  }
+                  final File r = rootOf(currentDir);
+                  if (r.getPath().equals("/")) {
+                      usageChip.setVisibility(View.GONE);
+                      return;
+                  }
+                  long total = 0, free = 0;
+                  try {
+                      StatFs s = new StatFs(r.getPath());
+                      total = s.getTotalBytes();
+                      free = s.getAvailableBytes();
+                  } catch (Exception ignored) {
+                  }
+                  int p = total > 0 ? (int) Math.round((total - free) * 100.0 / total) : 0;
+                  usageChip.setText("◔ " + p + " % utilisé");
+                  usageChip.setOnClickListener(v -> showAnalysis(r, currentDir));
+                  usageChip.setVisibility(View.VISIBLE);
+              }
+
               // ---------------------------------------------------------------- retour vers la recherche / la catégorie
 
               static boolean inside(File dir, File base) {
@@ -4489,7 +5102,14 @@ jobs:
               }
 
               void saveReturn(File entry) {
+                  if (mode == M_ANALYSIS) {
+                      ReturnState a = anaState();
+                      a.entry = entry;
+                      back = a;
+                      return;
+                  }
                   ReturnState st = new ReturnState();
+                  st.scope = listScope;
                   st.mode = mode;
                   st.kind = listKind;
                   st.title = listTitle;
@@ -4513,6 +5133,10 @@ jobs:
               void restoreReturn() {
                   final ReturnState st = back;
                   back = null;
+                  if (st.mode == M_ANALYSIS) {
+                      restoreAna(st);
+                      return;
+                  }
                   selected.clear();
                   scanGen++;
                   searchGen.incrementAndGet();
@@ -4542,6 +5166,7 @@ jobs:
                   } else {
                       mode = M_LIST;
                       listKind = st.kind;
+                      listScope = st.scope;
                       showListUi(st.title, false, false);
                       loading.setVisibility(View.GONE);
                       subText = st.sub;
