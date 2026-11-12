@@ -1,4 +1,4 @@
-# Fichiers Pro 2.0 — gestionnaire de fichiers Android (APK native)
+# Fichiers Pro 2.1 — gestionnaire de fichiers Android (APK native)
 # Mettre ce fichier dans GitHub : .github/workflows/fichiers-pro.yml
 # Puis : onglet Actions > "Construire Fichiers Pro" > Run workflow.
 # L'APK se télécharge dans l'onglet Actions > dernier build > Artifacts.
@@ -60,8 +60,8 @@ jobs:
                   applicationId 'com.fichierspro.app'
                   minSdk 26
                   targetSdk 34
-                  versionCode 2
-                  versionName '2.0'
+                  versionCode 3
+                  versionName '2.1'
               }
               signingConfigs {
                   release {
@@ -366,6 +366,197 @@ jobs:
           }
           FIN_DU_FICHIER
           mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/FileIcon.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.graphics.Canvas;
+          import android.graphics.ColorFilter;
+          import android.graphics.Paint;
+          import android.graphics.Path;
+          import android.graphics.PixelFormat;
+          import android.graphics.Rect;
+          import android.graphics.RectF;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.Drawable;
+
+          import java.util.HashMap;
+          import java.util.Locale;
+
+          /**
+           * Icône dessinée selon le format réel du fichier : page avec coin plié,
+           * bandeau de couleur du format (Word bleu, PDF rouge, Excel vert, PowerPoint orange…)
+           * et extension écrite dessus. Dossier dessiné à part.
+           */
+          final class FileIcon extends Drawable {
+
+              static final class Style {
+                  final int color;
+                  final String label;
+
+                  Style(int c, String l) {
+                      color = c;
+                      label = l;
+                  }
+              }
+
+              private static final HashMap<String, Integer> COLORS = new HashMap<>();
+              private static final HashMap<String, String> LABELS = new HashMap<>();
+
+              private static void put(int color, String exts) {
+                  for (String e : exts.split(" ")) COLORS.put(e, color);
+              }
+
+              static {
+                  put(0xFF2B579A, "doc docx docm dot dotx odt rtf wps pages");
+                  put(0xFFD93025, "pdf");
+                  put(0xFF1E7145, "xls xlsx xlsm xlsb xlt xltx ods csv tsv numbers");
+                  put(0xFFD24726, "ppt pptx pptm pps ppsx pot potx odp key");
+                  put(0xFF546E7A, "txt md log ini conf cfg properties srt sub nfo");
+                  put(0xFF6A1B9A, "java kt js ts py c cpp h cs php rb go rs swift sh bat sql gradle xml json yml yaml css");
+                  put(0xFFE65100, "html htm xhtml mht");
+                  put(0xFF795548, "epub mobi azw azw3 fb2 djvu cbz cbr");
+                  put(0xFFF9A825, "zip rar 7z tar gz tgz bz2 xz zst cab iso");
+                  put(0xFF2E9E4F, "apk xapk apks aab");
+                  put(0xFF37474F, "exe msi jar com cmd deb appimage");
+                  put(0xFF8E24AA, "mp3 wav ogg m4a aac flac amr opus wma mid midi aiff");
+                  put(0xFFC2185B, "mp4 mkv avi mov 3gp webm flv wmv m4v ts mpg mpeg vob");
+                  put(0xFF00897B, "jpg jpeg png gif bmp webp heic heif svg tif tiff ico raw dng psd");
+                  put(0xFF3949AB, "vcf ics");
+                  put(0xFF00838F, "ttf otf woff woff2");
+                  put(0xFF5D4037, "db sqlite sqlite3 bak");
+                  LABELS.put("docx", "DOCX");
+                  LABELS.put("jpeg", "JPG");
+                  LABELS.put("xlsx", "XLSX");
+                  LABELS.put("pptx", "PPTX");
+              }
+
+              static Style styleOf(String ext) {
+                  Integer c = COLORS.get(ext);
+                  String l = LABELS.get(ext);
+                  if (l == null) l = ext.length() <= 4 ? ext.toUpperCase(Locale.ROOT) : ext.substring(0, 4).toUpperCase(Locale.ROOT);
+                  return new Style(c != null ? c : 0xFF78909C, l);
+              }
+
+              private final boolean folder, dark;
+              private final Style st;
+              private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+              private final Path path = new Path();
+              private final RectF r = new RectF();
+
+              FileIcon(boolean folder, String ext, boolean dark) {
+                  this.folder = folder;
+                  this.dark = dark;
+                  this.st = folder ? new Style(0xFFFFB300, "") : styleOf(ext);
+                  p.setTypeface(Typeface.DEFAULT_BOLD);
+                  p.setTextAlign(Paint.Align.CENTER);
+              }
+
+              static int mix(int a, int b, float t) {
+                  int ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+                  int br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+                  return 0xFF000000 | ((int) (ar + (br - ar) * t) << 16) | ((int) (ag + (bg - ag) * t) << 8) | (int) (ab + (bb - ab) * t);
+              }
+
+              @Override
+              public void draw(Canvas c) {
+                  Rect b = getBounds();
+                  float s = Math.min(b.width(), b.height());
+                  float ox = b.left + (b.width() - s) / 2f, oy = b.top + (b.height() - s) / 2f;
+                  if (folder) drawFolder(c, ox, oy, s);
+                  else drawPage(c, ox, oy, s);
+              }
+
+              private void drawFolder(Canvas c, float x, float y, float s) {
+                  float l = x + s * 0.10f, rr = x + s * 0.90f, t = y + s * 0.20f, bot = y + s * 0.82f, k = s * 0.06f;
+                  p.setStyle(Paint.Style.FILL);
+                  p.setColor(0xFFF0A000);
+                  path.reset();
+                  path.moveTo(l, t + k);
+                  path.quadTo(l, t, l + k, t);
+                  path.lineTo(x + s * 0.38f, t);
+                  path.lineTo(x + s * 0.46f, t + s * 0.09f);
+                  path.lineTo(rr - k, t + s * 0.09f);
+                  path.quadTo(rr, t + s * 0.09f, rr, t + s * 0.09f + k);
+                  path.lineTo(rr, bot - k);
+                  path.lineTo(l, bot - k);
+                  path.close();
+                  c.drawPath(path, p);
+                  p.setColor(0xFFFFCA28);
+                  r.set(l, t + s * 0.19f, rr, bot);
+                  c.drawRoundRect(r, k, k, p);
+              }
+
+              private void drawPage(Canvas c, float x, float y, float s) {
+                  float w = s * 0.66f, h = s * 0.84f;
+                  float l = x + (s - w) / 2f + s * 0.04f, t = y + (s - h) / 2f, rr = l + w, bot = t + h;
+                  float fold = w * 0.30f, k = s * 0.06f;
+                  int base = dark ? 0xFF2A2F35 : 0xFFFFFFFF;
+                  p.setStyle(Paint.Style.FILL);
+                  // page
+                  path.reset();
+                  path.moveTo(l + k, t);
+                  path.lineTo(rr - fold, t);
+                  path.lineTo(rr, t + fold);
+                  path.lineTo(rr, bot - k);
+                  path.quadTo(rr, bot, rr - k, bot);
+                  path.lineTo(l + k, bot);
+                  path.quadTo(l, bot, l, bot - k);
+                  path.lineTo(l, t + k);
+                  path.quadTo(l, t, l + k, t);
+                  path.close();
+                  p.setColor(mix(st.color, base, dark ? 0.70f : 0.86f));
+                  c.drawPath(path, p);
+                  // coin plié
+                  path.reset();
+                  path.moveTo(rr - fold, t);
+                  path.lineTo(rr - fold, t + fold - k * 0.6f);
+                  path.quadTo(rr - fold, t + fold, rr - fold + k * 0.6f, t + fold);
+                  path.lineTo(rr, t + fold);
+                  path.close();
+                  p.setColor(mix(st.color, base, dark ? 0.35f : 0.55f));
+                  c.drawPath(path, p);
+                  // lignes de texte stylisées
+                  p.setColor(mix(st.color, base, dark ? 0.50f : 0.65f));
+                  float lh = s * 0.035f;
+                  for (int i = 0; i < 2; i++) {
+                      float ly = t + s * 0.17f + i * s * 0.09f;
+                      r.set(l + w * 0.16f, ly, rr - w * (i == 0 ? 0.42f : 0.20f), ly + lh);
+                      c.drawRoundRect(r, lh / 2, lh / 2, p);
+                  }
+                  // bandeau du format
+                  float bh = s * 0.27f, bt = bot - s * 0.10f - bh;
+                  r.set(x + s * 0.06f, bt, rr - w * 0.10f, bt + bh);
+                  p.setColor(st.color);
+                  c.drawRoundRect(r, s * 0.05f, s * 0.05f, p);
+                  if (!st.label.isEmpty()) {
+                      p.setColor(0xFFFFFFFF);
+                      float ts = s * (st.label.length() <= 3 ? 0.20f : 0.16f);
+                      p.setTextSize(ts);
+                      float maxW = r.width() * 0.88f;
+                      float tw = p.measureText(st.label);
+                      if (tw > maxW) p.setTextSize(ts * maxW / tw);
+                      Paint.FontMetrics fm = p.getFontMetrics();
+                      c.drawText(st.label, r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2f, p);
+                  }
+              }
+
+              @Override
+              public void setAlpha(int a) {
+                  p.setAlpha(a);
+              }
+
+              @Override
+              public void setColorFilter(ColorFilter cf) {
+                  p.setColorFilter(cf);
+              }
+
+              @Override
+              public int getOpacity() {
+                  return PixelFormat.TRANSLUCENT;
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
           cat > app/src/main/java/com/fichierspro/app/FileIndex.java << 'FIN_DU_FICHIER'
           package com.fichierspro.app;
 
@@ -418,7 +609,10 @@ jobs:
               volatile Runnable listener;
               private boolean again, againFull;
               private volatile long lastNotify, lastSyncEnd;
-              private SearchEngine.Snapshot snap;
+              private volatile SearchEngine.Snapshot snap;
+              private volatile boolean reloading;
+              /** La recherche instantanée a besoin de l'ordre alphabétique : il est préparé avec l'instantané. */
+              volatile boolean wantByName;
               private final Object snapLock = new Object();
 
               private FileIndex(Context c) {
@@ -874,6 +1068,30 @@ jobs:
                   }
               }
 
+              /**
+               * Instantané immédiat : si l'index a changé, on renvoie l'ancien tout de suite
+               * et on recharge en arrière-plan (la recherche est relancée quand c'est prêt).
+               */
+              SearchEngine.Snapshot snapshotFast() {
+                  SearchEngine.Snapshot s = snap;
+                  if (s == null) return snapshot();
+                  if (s.version != version.get() && !reloading) {
+                      reloading = true;
+                      Thread t = new Thread(() -> {
+                          try {
+                              snapshot();
+                          } catch (Throwable ignored) {
+                          } finally {
+                              reloading = false;
+                          }
+                          post();
+                      }, "index-snapshot");
+                      t.setPriority(Thread.NORM_PRIORITY - 1);
+                      t.start();
+                  }
+                  return s;
+              }
+
               private SearchEngine.Snapshot loadSnapshot() {
                   long v = version.get();
                   if (snap != null && snap.version == v) return snap;
@@ -886,6 +1104,7 @@ jobs:
                   s.size = new long[cap];
                   s.mtime = new long[cap];
                   s.flags = new byte[cap];
+                  s.type = new byte[cap];
                   ArrayList<String> dirs = new ArrayList<>();
                   HashMap<String, Integer> map = new HashMap<>();
                   try {
@@ -902,6 +1121,7 @@ jobs:
                                   s.size = Arrays.copyOf(s.size, cap);
                                   s.mtime = Arrays.copyOf(s.mtime, cap);
                                   s.flags = Arrays.copyOf(s.flags, cap);
+                                  s.type = Arrays.copyOf(s.type, cap);
                               }
                               String p = c.getString(0);
                               if (!p.equals(lastP)) {
@@ -920,8 +1140,10 @@ jobs:
                               s.norm[n] = Norm.of(name);
                               s.size[n] = c.getLong(2);
                               s.mtime[n] = c.getLong(3);
-                              s.flags[n] = (byte) ((c.getInt(4) != 0 ? SearchEngine.F_DIR : 0)
+                              boolean isDir = c.getInt(4) != 0;
+                              s.flags[n] = (byte) ((isDir ? SearchEngine.F_DIR : 0)
                                       | (c.getInt(5) != 0 ? SearchEngine.F_HIDDEN : 0));
+                              s.type[n] = isDir ? InstantSearch.T_DIR : InstantSearch.typeOf(name);
                               n++;
                           }
                       } finally {
@@ -931,6 +1153,7 @@ jobs:
                   }
                   s.n = n;
                   s.dirs = dirs.toArray(new String[0]);
+                  if (wantByName) InstantSearch.byName(s);
                   snap = s;
                   return s;
               }
@@ -1245,6 +1468,328 @@ jobs:
           }
           FIN_DU_FICHIER
           mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/InstantSearch.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.HashMap;
+          import java.util.Locale;
+          import java.util.concurrent.atomic.AtomicInteger;
+          import java.util.regex.Pattern;
+          import java.util.regex.PatternSyntaxException;
+
+          /**
+           * Recherche instantanée sur le modèle d'Everything :
+           * filtre direct à chaque frappe, sans classement par pertinence ni tolérance aux fautes.
+           * Syntaxe : espace = ET, | = OU, !mot = exclure, "phrase exacte", * et ? = jokers sur le nom entier.
+           */
+          final class InstantSearch {
+              private InstantSearch() {
+              }
+
+              static final byte T_OTHER = 0, T_IMG = 1, T_VID = 2, T_AUD = 3, T_DOC = 4, T_EXE = 5, T_ARC = 6, T_DIR = 7;
+              static final int SORT_NAME = 0, SORT_SIZE = 1, SORT_DATE = 2, SORT_PATH = 3;
+
+              private static final HashMap<String, Byte> TYPES = new HashMap<>();
+
+              private static void put(byte t, String exts) {
+                  for (String e : exts.split(" ")) TYPES.put(e, t);
+              }
+
+              static {
+                  put(T_IMG, "jpg jpeg png gif bmp webp heic heif svg tif tiff ico raw dng psd");
+                  put(T_VID, "mp4 mkv avi mov 3gp webm flv wmv m4v ts mpg mpeg vob");
+                  put(T_AUD, "mp3 wav ogg m4a aac flac amr opus wma mid midi aiff");
+                  put(T_DOC, "pdf doc docx docm dot dotx odt rtf txt md xls xlsx xlsm ods csv ppt pptx pps ppsx odp epub mobi djvu html htm");
+                  put(T_EXE, "apk xapk apks aab exe msi bat cmd jar com sh deb appimage");
+                  put(T_ARC, "zip rar 7z tar gz tgz bz2 xz zst cab iso");
+              }
+
+              static byte typeOf(String name) {
+                  int i = name.lastIndexOf('.');
+                  if (i <= 0 || i == name.length() - 1) return T_OTHER;
+                  Byte t = TYPES.get(name.substring(i + 1).toLowerCase(Locale.ROOT));
+                  return t == null ? T_OTHER : t;
+              }
+
+              static final class Opts {
+                  boolean caseSens, wholeWord, path, diacritics, regex;
+                  int type = -1;
+                  int sort = SORT_NAME;
+              }
+
+              static final class Result {
+                  int[] idx = new int[0];
+                  int total;
+                  String error;
+              }
+
+              /** Ordre alphabétique de l'instantané, calculé une seule fois par version de l'index. */
+              static int[] byName(final SearchEngine.Snapshot s) {
+                  synchronized (s) {
+                      if (s.byName != null) return s.byName;
+                      Integer[] a = new Integer[s.n];
+                      for (int i = 0; i < s.n; i++) a[i] = i;
+                      Arrays.sort(a, (x, y) -> {
+                          int c = s.norm[x].compareTo(s.norm[y]);
+                          if (c == 0) c = s.name[x].compareTo(s.name[y]);
+                          if (c == 0) c = s.dirs[s.parent[x]].compareTo(s.dirs[s.parent[y]]);
+                          return c;
+                      });
+                      int[] o = new int[s.n];
+                      for (int i = 0; i < s.n; i++) o[i] = a[i];
+                      s.byName = o;
+                      return o;
+                  }
+              }
+
+              /** Noms préparés pour les modes « sensible à la casse » / « respecter les accents » (calculés une fois). */
+              static String[] names(final SearchEngine.Snapshot s, Opts o) {
+                  if (!o.caseSens && !o.diacritics) return s.norm;
+                  if (o.caseSens && o.diacritics) return s.name;
+                  synchronized (s) {
+                      if (o.caseSens) {
+                          if (s.stripCase == null) {
+                              String[] a = new String[s.n];
+                              for (int i = 0; i < s.n; i++) a[i] = Norm.strip(s.name[i]);
+                              s.stripCase = a;
+                          }
+                          return s.stripCase;
+                      }
+                      if (s.lowerAcc == null) {
+                          String[] a = new String[s.n];
+                          for (int i = 0; i < s.n; i++) a[i] = s.name[i].toLowerCase(Locale.ROOT);
+                          s.lowerAcc = a;
+                      }
+                      return s.lowerAcc;
+                  }
+              }
+
+              private static final class Term {
+                  boolean neg;
+                  String[] alts;
+                  Pattern[] globs;
+                  String[] pre, suf;
+                  boolean[][] dirHit;
+              }
+
+              private static String fold(String x, Opts o) {
+                  if (o.caseSens) return o.diacritics ? x : Norm.strip(x);
+                  return o.diacritics ? x.toLowerCase(Locale.ROOT) : Norm.of(x);
+              }
+
+              private static ArrayList<String> split(String q) {
+                  ArrayList<String> out = new ArrayList<>();
+                  StringBuilder b = new StringBuilder();
+                  boolean quote = false;
+                  for (int i = 0; i < q.length(); i++) {
+                      char c = q.charAt(i);
+                      if (c == '"') {
+                          quote = !quote;
+                          continue;
+                      }
+                      if (!quote && Character.isWhitespace(c)) {
+                          if (b.length() > 0) out.add(b.toString());
+                          b.setLength(0);
+                      } else b.append(c);
+                  }
+                  if (b.length() > 0) out.add(b.toString());
+                  return out;
+              }
+
+              private static Pattern glob(String g, boolean caseSens) {
+                  StringBuilder r = new StringBuilder();
+                  for (int i = 0; i < g.length(); i++) {
+                      char c = g.charAt(i);
+                      if (c == '*') r.append(".*");
+                      else if (c == '?') r.append('.');
+                      else r.append(Pattern.quote(String.valueOf(c)));
+                  }
+                  return Pattern.compile(r.toString(), caseSens ? Pattern.DOTALL : Pattern.DOTALL | Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+              }
+
+              private static Opts stripOpts() {
+                  Opts x = new Opts();
+                  x.caseSens = true;
+                  return x;
+              }
+
+              private static int firstWild(String a) {
+                  int i = a.indexOf('*'), j = a.indexOf('?');
+                  return i < 0 ? j : (j < 0 ? i : Math.min(i, j));
+              }
+
+              private static int lastWild(String a) {
+                  return Math.max(a.lastIndexOf('*'), a.lastIndexOf('?'));
+              }
+
+              private static boolean alnum(char c) {
+                  return Character.isLetterOrDigit(c);
+              }
+
+              static boolean contains(String hay, String needle, boolean word) {
+                  if (!word) return hay.indexOf(needle) >= 0;
+                  int i = hay.indexOf(needle);
+                  int nl = needle.length();
+                  while (i >= 0) {
+                      boolean a = i == 0 || !alnum(hay.charAt(i - 1));
+                      int e = i + nl;
+                      boolean b = e >= hay.length() || !alnum(hay.charAt(e));
+                      if (a && b) return true;
+                      i = hay.indexOf(needle, i + 1);
+                  }
+                  return false;
+              }
+
+              static Result search(SearchEngine.Snapshot s, String query, Opts o, String scopeDir, boolean showHidden,
+                                   int limit, AtomicInteger gen, int myGen) {
+                  Result res = new Result();
+                  if (s == null || s.n == 0) return res;
+                  String q = query.trim();
+
+                  // dossiers autorisés (portée)
+                  boolean[] dirOk = null;
+                  if (scopeDir != null) {
+                      dirOk = new boolean[s.dirs.length];
+                      String pre = scopeDir.endsWith("/") ? scopeDir : scopeDir + "/";
+                      for (int d = 0; d < dirOk.length; d++)
+                          dirOk[d] = s.dirs[d].equals(scopeDir) || s.dirs[d].startsWith(pre);
+                  }
+
+                  String[] nms = names(s, o);
+                  String[] raw = o.diacritics ? s.name : (o.regex ? (o.caseSens ? nms : names(s, stripOpts())) : null);
+                  Pattern regex = null;
+                  Term[] terms = new Term[0];
+                  String[] dirsF = null;
+                  if (o.path) {
+                      dirsF = new String[s.dirs.length];
+                      for (int d = 0; d < dirsF.length; d++) dirsF[d] = fold(s.dirs[d], o);
+                  }
+                  if (!q.isEmpty()) {
+                      if (o.regex) {
+                          try {
+                              int fl = o.caseSens ? 0 : Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
+                              regex = Pattern.compile(o.diacritics ? q : Norm.strip(q), fl);
+                          } catch (PatternSyntaxException e) {
+                              res.error = "Expression régulière invalide";
+                              return res;
+                          }
+                      } else {
+                          ArrayList<String> parts = split(q);
+                          ArrayList<Term> ts = new ArrayList<>();
+                          for (String p : parts) {
+                              Term t = new Term();
+                              if (p.startsWith("!") && p.length() > 1) {
+                                  t.neg = true;
+                                  p = p.substring(1);
+                              }
+                              String[] alts = p.split("\\|");
+                              ArrayList<String> keep = new ArrayList<>();
+                              for (String a : alts) if (!a.isEmpty()) keep.add(a);
+                              if (keep.isEmpty()) continue;
+                              t.alts = new String[keep.size()];
+                              t.globs = new Pattern[keep.size()];
+                              t.dirHit = new boolean[keep.size()][];
+                              t.pre = new String[keep.size()];
+                              t.suf = new String[keep.size()];
+                              for (int k = 0; k < keep.size(); k++) {
+                                  String a = fold(keep.get(k), o);
+                                  t.alts[k] = a;
+                                  if (a.indexOf('*') >= 0 || a.indexOf('?') >= 0) {
+                                      t.globs[k] = glob(a, o.caseSens);
+                                      int f = firstWild(a), l = lastWild(a);
+                                      t.pre[k] = a.substring(0, f);
+                                      t.suf[k] = a.substring(l + 1);
+                                  }
+                                  else if (dirsF != null) {
+                                      boolean[] h = new boolean[dirsF.length];
+                                      for (int d = 0; d < h.length; d++) h[d] = contains(dirsF[d], a, o.wholeWord);
+                                      t.dirHit[k] = h;
+                                  }
+                              }
+                              ts.add(t);
+                          }
+                          terms = ts.toArray(new Term[0]);
+                      }
+                  }
+
+                  int[] order = o.sort == SORT_NAME ? byName(s) : null;
+                  int n = s.n;
+                  boolean sortAfter = o.sort != SORT_NAME;
+                  int[] hits = new int[sortAfter ? 1024 : Math.min(limit, 1024)];
+                  int k = 0, total = 0;
+                  for (int j = 0; j < n; j++) {
+                      if ((j & 4095) == 0 && gen != null && gen.get() != myGen) return null;
+                      int i = order != null ? order[j] : j;
+                      byte fl = s.flags[i];
+                      if (!showHidden && (fl & SearchEngine.F_HIDDEN) != 0) continue;
+                      if (o.type >= 0 && s.type[i] != o.type) continue;
+                      if (dirOk != null && !dirOk[s.parent[i]]) continue;
+                      if (regex != null) {
+                          String nm = raw[i];
+                          String target = o.path ? (o.diacritics ? s.path(i) : Norm.strip(s.dirs[s.parent[i]]) + "/" + nm) : nm;
+                          if (!regex.matcher(target).find()) continue;
+                      } else if (terms.length > 0) {
+                          String nm = nms[i];
+                          boolean ok = true;
+                          for (Term t : terms) {
+                              boolean any = false;
+                              for (int a = 0; a < t.alts.length && !any; a++) {
+                                  if (t.globs[a] != null) {
+                                      if (!o.path && !(nm.startsWith(t.pre[a]) && nm.endsWith(t.suf[a])
+                                              && nm.length() >= t.pre[a].length() + t.suf[a].length())) continue;
+                                      String target = o.path ? (dirsF[s.parent[i]] + "/" + nm) : nm;
+                                      any = t.globs[a].matcher(target).matches()
+                                              || (o.path && t.globs[a].matcher(nm).matches());
+                                  } else {
+                                      any = contains(nm, t.alts[a], o.wholeWord)
+                                              || (t.dirHit[a] != null && t.dirHit[a][s.parent[i]]);
+                                  }
+                              }
+                              if (any == t.neg) {
+                                  ok = false;
+                                  break;
+                              }
+                          }
+                          if (!ok) continue;
+                      }
+                      total++;
+                      if (!sortAfter && k >= limit) continue;
+                      if (k == hits.length) hits = Arrays.copyOf(hits, k * 2);
+                      hits[k++] = i;
+                  }
+                  if (sortAfter && k > 0) {
+                      long[] keys = new long[k];
+                      for (int a = 0; a < k; a++) {
+                          int i = hits[a];
+                          long v;
+                          if (o.sort == SORT_SIZE) v = Math.min(s.size[i], (1L << 41) - 1);
+                          else if (o.sort == SORT_DATE) v = Math.min(Math.max(s.mtime[i], 0), (1L << 42) - 1);
+                          else v = 0;
+                          keys[a] = (((1L << 42) - 1 - v) << 21) | a;
+                      }
+                      if (o.sort == SORT_PATH) {
+                          final int[] h = hits;
+                          Integer[] ord = new Integer[k];
+                          for (int a = 0; a < k; a++) ord[a] = a;
+                          Arrays.sort(ord, (x, y) -> {
+                              int c = s.dirs[s.parent[h[x]]].compareToIgnoreCase(s.dirs[s.parent[h[y]]]);
+                              return c != 0 ? c : s.norm[h[x]].compareTo(s.norm[h[y]]);
+                          });
+                          for (int a = 0; a < k; a++) keys[a] = ((long) a << 21) | ord[a];
+                      } else Arrays.sort(keys);
+                      int m = Math.min(k, limit);
+                      int[] out = new int[m];
+                      for (int a = 0; a < m; a++) out[a] = hits[(int) (keys[a] & 0x1FFFFF)];
+                      res.idx = out;
+                  } else res.idx = Arrays.copyOf(hits, k);
+                  res.total = total;
+                  return res;
+              }
+          }
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
           cat > app/src/main/java/com/fichierspro/app/MainActivity.java << 'FIN_DU_FICHIER'
           package com.fichierspro.app;
 
@@ -1371,6 +1916,23 @@ jobs:
               File searchHome, searchScope;
               String searchQuery = "", searchStatus = "";
               long searchVer;
+              boolean instantMode, suppressWatcher;
+              int softGen = -1;
+              final InstantSearch.Opts iopts = new InstantSearch.Opts();
+              HorizontalScrollView typeScroll;
+              LinearLayout typeChips;
+              TextView searchInfo;
+              ReturnState back;
+
+              /** Écran à retrouver avec le bouton Retour (résultats de recherche ou liste de catégorie). */
+              static final class ReturnState {
+                  int mode, kind, pos, top;
+                  String title, sub, query, status;
+                  ArrayList<File> items;
+                  File prevDir, searchHome, searchScope, entry;
+                  boolean instant;
+                  long searchVer;
+              }
               final AtomicInteger searchGen = new AtomicInteger();
               final ExecutorService searchExec = Executors.newSingleThreadExecutor();
               final Runnable searchRun = new Runnable() {
@@ -1429,6 +1991,7 @@ jobs:
                   getWindow().setStatusBarColor(darker(cPrimary));
                   getWindow().setNavigationBarColor(cCard);
                   buildUi();
+                  loadSearchPrefs();
                   if (!hasPerm()) {
                       showPermScreen();
                       return;
@@ -1477,6 +2040,10 @@ jobs:
                       return;
                   }
                   if (mode == M_BROWSE) {
+                      if (back != null && (currentDir.equals(back.entry) || !inside(currentDir, back.entry))) {
+                          restoreReturn();
+                          return;
+                      }
                       File r = rootOf(currentDir);
                       File parent = currentDir.getParentFile();
                       if (currentDir.equals(r) || parent == null) showHome();
@@ -1808,9 +2375,10 @@ jobs:
 
                       @Override
                       public void afterTextChanged(Editable e) {
-                          if (mode != M_SEARCH) return;
+                          if (mode != M_SEARCH || suppressWatcher) return;
                           ui.removeCallbacks(searchRun);
-                          ui.postDelayed(searchRun, 140);
+                          if (instantMode) ui.post(searchRun);
+                          else ui.postDelayed(searchRun, 140);
                       }
                   });
                   searchEdit.setOnEditorActionListener((v, id, ev) -> {
@@ -1840,6 +2408,24 @@ jobs:
                   crumbs.setPadding(dp(8), dp(4), dp(8), dp(4));
                   crumbScroll.addView(crumbs);
                   root.addView(crumbScroll, new LinearLayout.LayoutParams(-1, -2));
+
+                  typeScroll = new HorizontalScrollView(this);
+                  typeScroll.setHorizontalScrollBarEnabled(false);
+                  typeScroll.setBackgroundColor(cCard);
+                  typeChips = new LinearLayout(this);
+                  typeChips.setOrientation(LinearLayout.HORIZONTAL);
+                  typeChips.setGravity(Gravity.CENTER_VERTICAL);
+                  typeChips.setPadding(dp(8), dp(2), dp(8), dp(6));
+                  typeScroll.addView(typeChips);
+                  typeScroll.setVisibility(View.GONE);
+                  root.addView(typeScroll, new LinearLayout.LayoutParams(-1, -2));
+
+                  searchInfo = text("", 12, cSub, false);
+                  searchInfo.setSingleLine(true);
+                  searchInfo.setEllipsize(TextUtils.TruncateAt.END);
+                  searchInfo.setPadding(dp(16), dp(5), dp(16), dp(5));
+                  searchInfo.setVisibility(View.GONE);
+                  root.addView(searchInfo, new LinearLayout.LayoutParams(-1, -2));
 
                   content = new FrameLayout(this);
                   root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -1917,7 +2503,7 @@ jobs:
 
               void updateEmpty() {
                   boolean show = items.isEmpty() && loading.getVisibility() != View.VISIBLE;
-                  if (mode == M_SEARCH && searchQuery.isEmpty()) show = false;
+                  if (mode == M_SEARCH && searchQuery.isEmpty() && !instantMode) show = false;
                   emptyView.setText(mode == M_TRASH ? "🗑\n\nLa corbeille est vide"
                           : mode == M_SEARCH ? "🔎\n\nAucun résultat"
                           : mode == M_LIST ? "📂\n\nAucun fichier dans cette catégorie" : "📂\n\nDossier vide");
@@ -1926,6 +2512,8 @@ jobs:
 
               void updateHeader() {
                   topActions.removeAllViews();
+                  typeScroll.setVisibility(mode == M_SEARCH && instantMode && selected.isEmpty() ? View.VISIBLE : View.GONE);
+                  searchInfo.setVisibility(mode == M_SEARCH && selected.isEmpty() ? View.VISIBLE : View.GONE);
                   boolean bar = mode == M_SEARCH && selected.isEmpty();
                   searchEdit.setVisibility(bar ? View.VISIBLE : View.GONE);
                   titleCol.setVisibility(bar ? View.GONE : View.VISIBLE);
@@ -2004,6 +2592,7 @@ jobs:
 
               void showHome() {
                   ensureIndex();
+                  back = null;
                   mode = M_HOME;
                   scanGen++;
                   selected.clear();
@@ -2090,16 +2679,19 @@ jobs:
 
                   List<String> rec = recents();
                   if (!rec.isEmpty()) {
-                      col.addView(section("Récents"));
-                      LinearLayout box = cardBox();
-                      int n = 0;
+                      ArrayList<File> rf = new ArrayList<>();
                       for (String p : rec) {
-                          final File f = new File(p);
-                          if (!f.exists()) continue;
-                          box.addView(homeRow(emoji(f), f.getName(), fmtSize(f.length()) + "  •  " + f.getParent(), v -> openFile(f)));
-                          if (++n >= 8) break;
+                          File f = new File(p);
+                          if (f.exists()) rf.add(f);
+                          if (rf.size() >= 10) break;
                       }
-                      if (n > 0) col.addView(box);
+                      if (!rf.isEmpty()) {
+                          final View head = sectionWithAction("Récents", "Tout effacer", v -> confirmClearRecents());
+                          final LinearLayout box = cardBox();
+                          col.addView(head);
+                          for (File f : rf) box.addView(recentRow(f, box, head));
+                          col.addView(box);
+                      }
                   }
 
                   content.removeAllViews();
@@ -2352,8 +2944,11 @@ jobs:
                   } else if (mode == M_LIST) {
                       if (selected.isEmpty()) loadList(true);
                   } else if (mode == M_SEARCH) {
-                      if (selected.isEmpty() && !searchQuery.isEmpty() && index.version.get() != searchVer
-                              && (!index.syncing || items.isEmpty())) runSearch();
+                      if (selected.isEmpty() && (instantMode || !searchQuery.isEmpty()) && index.version.get() != searchVer
+                              && (!index.syncing || items.isEmpty())) {
+                          runSearch();
+                          softGen = searchGen.get();
+                      }
                   }
               }
 
@@ -2386,6 +2981,7 @@ jobs:
 
               void showCategory(String title, int kind) {
                   ensureIndex();
+                  back = null;
                   mode = M_LIST;
                   listKind = kind;
                   selected.clear();
@@ -2463,6 +3059,7 @@ jobs:
 
               void openSearch() {
                   ensureIndex();
+                  back = null;
                   searchHome = mode == M_BROWSE ? currentDir : null;
                   searchScope = searchHome;
                   prevDir = searchHome;
@@ -2474,20 +3071,44 @@ jobs:
                   showListUi("Recherche", true, false);
                   loading.setVisibility(View.GONE);
                   content.addView(historyView, new FrameLayout.LayoutParams(-1, -1));
+                  suppressWatcher = true;
                   searchEdit.setText("");
+                  suppressWatcher = false;
+                  buildTypeChips();
                   buildSearchStatus();
-                  showHistory();
+                  if (instantMode) runSearch();
+                  else showHistory();
+                  updateHeader();
                   searchEdit.requestFocus();
                   searchEdit.post(() -> {
                       InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
                       if (im != null && mode == M_SEARCH) im.showSoftInput(searchEdit, InputMethodManager.SHOW_IMPLICIT);
                   });
                   final FileIndex ix = index;
-                  searchExec.execute(ix::snapshot);
+                  if (instantMode) ix.wantByName = true;
+                  searchExec.execute(() -> {
+                      SearchEngine.Snapshot sn = ix.snapshot();
+                      if (instantMode) InstantSearch.byName(sn);
+                  });
               }
 
               void buildSearchStatus() {
                   crumbs.removeAllViews();
+                  LinearLayout seg = new LinearLayout(this);
+                  seg.setOrientation(LinearLayout.HORIZONTAL);
+                  seg.setBackground(round(soft(cPrimary), 16));
+                  seg.setPadding(dp(2), dp(2), dp(2), dp(2));
+                  String[][] modes = {{"🌐 Globale", "0"}, {"⚡ Instantanée", "1"}};
+                  for (final String[] md : modes) {
+                      final boolean inst = md[1].equals("1");
+                      boolean on = inst == instantMode;
+                      TextView t = text(md[0], 12, on ? Color.WHITE : hi(), true);
+                      t.setPadding(dp(12), dp(5), dp(12), dp(5));
+                      if (on) t.setBackground(round(cPrimary, 14));
+                      t.setOnClickListener(v -> setInstantMode(inst));
+                      seg.addView(t);
+                  }
+                  crumbs.addView(seg);
                   if (searchHome != null) {
                       String where = searchScope == null ? "🌐 Partout"
                               : "📁 " + (searchHome.equals(internalRoot()) ? "Stockage interne" : searchHome.getName());
@@ -2499,11 +3120,203 @@ jobs:
                           buildSearchStatus();
                           runSearch();
                       });
-                      crumbs.addView(chip);
+                      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+                      lp.setMargins(dp(8), 0, 0, 0);
+                      crumbs.addView(chip, lp);
                   }
-                  TextView st = text(searchStatus.isEmpty() ? "Résultats pendant la saisie" : searchStatus, 12, cSub, false);
-                  st.setPadding(dp(8), dp(6), dp(8), dp(6));
-                  crumbs.addView(st);
+                  String st = searchStatus;
+                  if (st.isEmpty()) st = instantMode ? "Filtre direct à chaque lettre" : "Résultats pendant la saisie";
+                  String flags = instantMode ? optsLabel() : "";
+                  searchInfo.setText(flags.isEmpty() ? st : st + "   •   " + flags);
+              }
+
+              void setInstantMode(boolean on) {
+                  if (on == instantMode) return;
+                  instantMode = on;
+                  prefs.edit().putBoolean("smode", on).apply();
+                  if (on && index != null) index.wantByName = true;
+                  searchStatus = "";
+                  items.clear();
+                  adapter.notifyDataSetChanged();
+                  buildTypeChips();
+                  buildSearchStatus();
+                  updateHeader();
+                  historyView.setVisibility(View.GONE);
+                  searchQuery = searchEdit.getText().toString().trim();
+                  runSearch();
+              }
+
+              void loadSearchPrefs() {
+                  instantMode = prefs.getBoolean("smode", false);
+                  iopts.caseSens = prefs.getBoolean("o_case", false);
+                  iopts.wholeWord = prefs.getBoolean("o_word", false);
+                  iopts.path = prefs.getBoolean("o_path", false);
+                  iopts.diacritics = prefs.getBoolean("o_acc", false);
+                  iopts.regex = prefs.getBoolean("o_regex", false);
+                  iopts.type = prefs.getInt("o_type", -1);
+                  iopts.sort = prefs.getInt("o_sort", InstantSearch.SORT_NAME);
+              }
+
+              void searchOptsChanged() {
+                  prefs.edit().putBoolean("o_case", iopts.caseSens).putBoolean("o_word", iopts.wholeWord)
+                          .putBoolean("o_path", iopts.path).putBoolean("o_acc", iopts.diacritics)
+                          .putBoolean("o_regex", iopts.regex).putInt("o_type", iopts.type).putInt("o_sort", iopts.sort).apply();
+                  buildTypeChips();
+                  buildSearchStatus();
+                  runSearch();
+              }
+
+              String optsLabel() {
+                  ArrayList<String> o = new ArrayList<>();
+                  if (iopts.caseSens) o.add("Aa casse");
+                  if (iopts.wholeWord) o.add("mot entier");
+                  if (iopts.path) o.add("chemin");
+                  if (iopts.diacritics) o.add("accents");
+                  if (iopts.regex) o.add("regex");
+                  String[] sorts = {"", "tri : taille", "tri : date", "tri : chemin"};
+                  if (iopts.sort > 0 && iopts.sort < sorts.length) o.add(sorts[iopts.sort]);
+                  return TextUtils.join(" • ", o);
+              }
+
+              void buildTypeChips() {
+                  typeChips.removeAllViews();
+                  int active = (iopts.caseSens ? 1 : 0) + (iopts.wholeWord ? 1 : 0) + (iopts.path ? 1 : 0)
+                          + (iopts.diacritics ? 1 : 0) + (iopts.regex ? 1 : 0) + (iopts.sort > 0 ? 1 : 0);
+                  TextView opt = text("⚙ Options" + (active > 0 ? " (" + active + ")" : ""), 12, hi(), true);
+                  opt.setPadding(dp(12), dp(6), dp(12), dp(6));
+                  GradientDrawable ob = round(Color.TRANSPARENT, 16);
+                  ob.setStroke(dp(1), hi());
+                  opt.setBackground(ob);
+                  opt.setOnClickListener(this::optionsMenu);
+                  typeChips.addView(opt);
+                  Object[][] types = {{"Tout", -1}, {"🎵 Audio", (int) InstantSearch.T_AUD}, {"🗜 Compressé", (int) InstantSearch.T_ARC},
+                          {"📄 Document", (int) InstantSearch.T_DOC}, {"⚙ Exécutable", (int) InstantSearch.T_EXE},
+                          {"📁 Dossier", (int) InstantSearch.T_DIR}, {"🖼 Image", (int) InstantSearch.T_IMG},
+                          {"🎬 Vidéo", (int) InstantSearch.T_VID}};
+                  for (final Object[] t : types) {
+                      final int ty = (Integer) t[1];
+                      boolean on = ty == iopts.type;
+                      TextView c = text((String) t[0], 12, on ? Color.WHITE : cText, on);
+                      c.setPadding(dp(12), dp(6), dp(12), dp(6));
+                      if (on) c.setBackground(round(cPrimary, 16));
+                      else {
+                          GradientDrawable g = round(Color.TRANSPARENT, 16);
+                          g.setStroke(dp(1), cDivider);
+                          c.setBackground(g);
+                      }
+                      c.setOnClickListener(v -> {
+                          iopts.type = ty;
+                          searchOptsChanged();
+                      });
+                      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+                      lp.setMargins(dp(6), 0, 0, 0);
+                      typeChips.addView(c, lp);
+                  }
+              }
+
+              void optionsMenu(View anchor) {
+                  PopupMenu pm = new PopupMenu(this, anchor);
+                  Menu m = pm.getMenu();
+                  m.add(0, 50, 0, "Sensible à la casse").setCheckable(true).setChecked(iopts.caseSens);
+                  m.add(0, 51, 1, "Respecter le mot entier").setCheckable(true).setChecked(iopts.wholeWord);
+                  m.add(0, 52, 2, "Respecter le chemin").setCheckable(true).setChecked(iopts.path);
+                  m.add(0, 53, 3, "Respecter les signes diacritiques").setCheckable(true).setChecked(iopts.diacritics);
+                  m.add(0, 54, 4, "Autoriser les expressions régulières").setCheckable(true).setChecked(iopts.regex);
+                  m.add(1, 55, 5, "↕  Trier les résultats…");
+                  m.add(1, 56, 6, "❔  Aide : syntaxe de recherche");
+                  pm.setOnMenuItemClickListener(it -> {
+                      switch (it.getItemId()) {
+                          case 50: iopts.caseSens = !iopts.caseSens; break;
+                          case 51: iopts.wholeWord = !iopts.wholeWord; break;
+                          case 52: iopts.path = !iopts.path; break;
+                          case 53: iopts.diacritics = !iopts.diacritics; break;
+                          case 54: iopts.regex = !iopts.regex; break;
+                          case 55: searchSortDialog(); return true;
+                          default: syntaxHelp(); return true;
+                      }
+                      searchOptsChanged();
+                      return true;
+                  });
+                  pm.show();
+              }
+
+              void searchSortDialog() {
+                  String[] opts = {"Nom (A → Z)", "Taille (plus gros d'abord)", "Date (plus récent d'abord)", "Chemin"};
+                  new AlertDialog.Builder(this).setTitle("Trier les résultats")
+                          .setSingleChoiceItems(opts, iopts.sort, (d, w) -> {
+                              iopts.sort = w;
+                              searchOptsChanged();
+                              d.dismiss();
+                          }).setNegativeButton("Fermer", null).show();
+              }
+
+              void syntaxHelp() {
+                  TextView tv = text("Recherche instantanée : la liste se filtre à chaque lettre.\n\n"
+                          + "•  espace = ET  →  palais memoire\n"
+                          + "•  |  = OU  →  pdf|docx\n"
+                          + "•  !  = exclure  →  palais !pdf\n"
+                          + "•  \"…\" = expression exacte  →  \"de memoire\"\n"
+                          + "•  *  et  ?  = jokers sur le nom  →  *.apk   rapport??.pdf\n\n"
+                          + "Options : sensible à la casse, mot entier, chemin (cherche aussi dans les noms de dossiers), "
+                          + "signes diacritiques (é ≠ e), expressions régulières.\n\n"
+                          + "Sans option, majuscules et accents sont ignorés : « daved » trouve Davèd, Daved, DaveD.",
+                          14, cText, false);
+                  tv.setPadding(dp(22), dp(14), dp(22), dp(8));
+                  tv.setLineSpacing(0, 1.2f);
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(tv);
+                  new AlertDialog.Builder(this).setTitle("Syntaxe de recherche").setView(sv).setPositiveButton("OK", null).show();
+              }
+
+              void runInstant() {
+                  final String q = searchEdit.getText().toString();
+                  searchQuery = q.trim();
+                  final int g = searchGen.incrementAndGet();
+                  historyView.setVisibility(View.GONE);
+                  final InstantSearch.Opts o = new InstantSearch.Opts();
+                  o.caseSens = iopts.caseSens;
+                  o.wholeWord = iopts.wholeWord;
+                  o.path = iopts.path;
+                  o.diacritics = iopts.diacritics;
+                  o.regex = iopts.regex;
+                  o.type = iopts.type;
+                  o.sort = iopts.sort;
+                  final String scope = searchScope == null ? null : searchScope.getAbsolutePath();
+                  final boolean hidden = showHidden();
+                  final FileIndex ix = index;
+                  ix.wantByName = true;
+                  searchExec.execute(() -> {
+                      if (searchGen.get() != g) return;
+                      long t0 = SystemClock.uptimeMillis();
+                      SearchEngine.Snapshot sn = ix.snapshotFast();
+                      final InstantSearch.Result r = InstantSearch.search(sn, q, o, scope, hidden, 20000, searchGen, g);
+                      if (r == null) return;
+                      final ArrayList<File> list = new ArrayList<>(r.idx.length);
+                      for (int i : r.idx) {
+                          if ((list.size() & 2047) == 0 && searchGen.get() != g) return;
+                          list.add(new IFile(sn.path(i), (sn.flags[i] & SearchEngine.F_DIR) != 0, sn.size[i], sn.mtime[i]));
+                      }
+                      final long ms = SystemClock.uptimeMillis() - t0;
+                      final long ver = sn.version;
+                      ui.post(() -> {
+                          if (searchGen.get() != g || mode != M_SEARCH || !selected.isEmpty() || !instantMode) return;
+                          searchVer = ver;
+                          int keepPos = listView.getFirstVisiblePosition();
+                          View k0 = listView.getChildAt(0);
+                          int keepTop = k0 == null ? 0 : k0.getTop() - listView.getPaddingTop();
+                          items.clear();
+                          items.addAll(list);
+                          adapter.notifyDataSetChanged();
+                          if (softGen == g) listView.setSelectionFromTop(Math.min(keepPos, Math.max(0, items.size() - 1)), keepTop);
+                          else listView.setSelection(0);
+                          if (r.error != null) searchStatus = "⚠ " + r.error;
+                          else searchStatus = fmtCount(r.total) + " objet(s)"
+                                  + (r.total > r.idx.length ? " — " + fmtCount(r.idx.length) + " premiers affichés" : "")
+                                  + "  •  " + ms + " ms" + (sn.n == 0 && ix.syncing ? "  •  indexation…" : "");
+                          buildSearchStatus();
+                          updateEmpty();
+                      });
+                  });
               }
 
               void showHistory() {
@@ -2544,6 +3357,10 @@ jobs:
 
               void runSearch() {
                   if (mode != M_SEARCH || index == null) return;
+                  if (instantMode) {
+                      runInstant();
+                      return;
+                  }
                   final String q = searchEdit.getText().toString().trim();
                   searchQuery = q;
                   final int g = searchGen.incrementAndGet();
@@ -2563,7 +3380,7 @@ jobs:
                   searchExec.execute(() -> {
                       if (searchGen.get() != g) return;
                       long t0 = SystemClock.uptimeMillis();
-                      SearchEngine.Snapshot sn = ix.snapshot();
+                      SearchEngine.Snapshot sn = ix.snapshotFast();
                       SearchEngine.Result r = SearchEngine.search(sn, q, scope, hidden, 300, false, searchGen, g);
                       if (r == null) return;
                       if (r.total > 0) publishSearch(sn, r, g, t0);
@@ -2582,12 +3399,16 @@ jobs:
                   final long ms = SystemClock.uptimeMillis() - t0;
                   final long ver = sn.version;
                   ui.post(() -> {
-                      if (searchGen.get() != g || mode != M_SEARCH || !selected.isEmpty()) return;
+                      if (searchGen.get() != g || mode != M_SEARCH || !selected.isEmpty() || instantMode) return;
                       searchVer = ver;
+                      int keepPos = listView.getFirstVisiblePosition();
+                      View k0 = listView.getChildAt(0);
+                      int keepTop = k0 == null ? 0 : k0.getTop() - listView.getPaddingTop();
                       items.clear();
                       items.addAll(list);
                       adapter.notifyDataSetChanged();
-                      listView.setSelection(0);
+                      if (softGen == g) listView.setSelectionFromTop(Math.min(keepPos, Math.max(0, items.size() - 1)), keepTop);
+                      else listView.setSelection(0);
                       searchStatus = fmtCount(r.total) + " résultat(s)"
                               + (r.total > r.idx.length ? " — " + r.idx.length + " meilleurs affichés" : "")
                               + (r.fuzzy ? "  •  approchants inclus" : "") + "  •  " + ms + " ms";
@@ -2598,7 +3419,19 @@ jobs:
 
               CharSequence highlighted(String name) {
                   if (searchQuery.isEmpty()) return name;
-                  int[] h = SearchEngine.highlight(name, searchQuery);
+                  String hq = searchQuery;
+                  if (instantMode) {
+                      if (iopts.regex) return name;
+                      StringBuilder b = new StringBuilder();
+                      for (String t : hq.replace("\"", " ").split("\\s+")) {
+                          if (t.isEmpty() || t.startsWith("!")) continue;
+                          String first = t.split("\\|")[0].replace("*", " ").replace("?", " ").trim();
+                          if (!first.isEmpty()) b.append(first).append(' ');
+                      }
+                      hq = b.toString().trim();
+                      if (hq.isEmpty()) return name;
+                  }
+                  int[] h = SearchEngine.highlight(name, hq);
                   if (h == null) return name;
                   SpannableString sp = new SpannableString(name);
                   sp.setSpan(new ForegroundColorSpan(hi()), h[0], h[1], Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -2607,6 +3440,7 @@ jobs:
               }
 
               void showTrash() {
+                  back = null;
                   mode = M_TRASH;
                   selected.clear();
                   subText = "Appuyez sur un élément pour le restaurer";
@@ -2669,6 +3503,7 @@ jobs:
                       hideKeyboard();
                   }
                   if (f.isDirectory()) {
+                      if (mode == M_SEARCH || mode == M_LIST) saveReturn(f);
                       browse(f, null);
                       return;
                   }
@@ -2751,8 +3586,17 @@ jobs:
                       m.add(0, 7, 6, "ℹ  Propriétés du dossier");
                       m.add(0, 8, 7, "🏠  Accueil");
                   }
+                  if (mode == M_SEARCH && instantMode) {
+                      m.add(2, 50, 0, "Sensible à la casse").setCheckable(true).setChecked(iopts.caseSens);
+                      m.add(2, 51, 1, "Respecter le mot entier").setCheckable(true).setChecked(iopts.wholeWord);
+                      m.add(2, 52, 2, "Respecter le chemin").setCheckable(true).setChecked(iopts.path);
+                      m.add(2, 53, 3, "Respecter les signes diacritiques").setCheckable(true).setChecked(iopts.diacritics);
+                      m.add(2, 54, 4, "Autoriser les expressions régulières").setCheckable(true).setChecked(iopts.regex);
+                      m.add(2, 55, 5, "↕  Trier les résultats…");
+                      m.add(2, 56, 6, "❔  Aide : syntaxe de recherche");
+                  }
                   if (mode == M_LIST || mode == M_SEARCH) {
-                      m.add(0, 5, 0, "☑  Tout sélectionner");
+                      m.add(0, 5, 10, "☑  Tout sélectionner");
                       m.add(0, 40, 1, "🔄  Actualiser l'index");
                       m.add(0, 8, 2, "🏠  Accueil");
                   }
@@ -2763,6 +3607,7 @@ jobs:
                   if (mode == M_HOME) {
                       m.add(0, 30, 0, "🗂  Explorer la racine ( / )");
                       m.add(0, 40, 1, "🔄  Réindexer le stockage");
+                      if (!recents().isEmpty()) m.add(0, 41, 2, "🕘  Effacer les fichiers récents");
                       m.add(0, 31, 2, "ℹ  À propos");
                   }
                   m.add(1, 10, 20, "Afficher les fichiers cachés").setCheckable(true).setChecked(showHidden());
@@ -2813,6 +3658,35 @@ jobs:
                               else if (mode == M_SEARCH) runSearch();
                               else refresh();
                               break;
+                          case 41:
+                              confirmClearRecents();
+                              break;
+                          case 50:
+                              iopts.caseSens = !iopts.caseSens;
+                              searchOptsChanged();
+                              break;
+                          case 51:
+                              iopts.wholeWord = !iopts.wholeWord;
+                              searchOptsChanged();
+                              break;
+                          case 52:
+                              iopts.path = !iopts.path;
+                              searchOptsChanged();
+                              break;
+                          case 53:
+                              iopts.diacritics = !iopts.diacritics;
+                              searchOptsChanged();
+                              break;
+                          case 54:
+                              iopts.regex = !iopts.regex;
+                              searchOptsChanged();
+                              break;
+                          case 55:
+                              searchSortDialog();
+                              break;
+                          case 56:
+                              syntaxHelp();
+                              break;
                           case 40:
                               if (index != null) {
                                   index.requestSync(true);
@@ -2833,9 +3707,9 @@ jobs:
                               browse(new File("/"), null);
                               break;
                           case 31:
-                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.0")
+                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.1")
                                       .setMessage("Gestionnaire de fichiers complet :\n\n• Explorer, copier, couper, coller\n• Corbeille avec restauration\n"
-                                              + "• Compression et extraction ZIP\n• Recherche instantanée, sans accents ni majuscules\n• Catégories et gros fichiers indexés\n"
+                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Catégories et gros fichiers indexés\n"
                                               + "• Miniatures photos et vidéos\n• Éditeur de texte intégré\n• Favoris, récents, MD5, thème sombre")
                                       .setPositiveButton("OK", null).show();
                               break;
@@ -2921,7 +3795,10 @@ jobs:
                               break;
                           case 8:
                               File parent = one.getParentFile();
-                              if (parent != null) browse(parent, one);
+                              if (parent != null) {
+                                  if (mode == M_SEARCH || mode == M_LIST) saveReturn(parent);
+                                  browse(parent, one);
+                              }
                               break;
                       }
                       return true;
@@ -3603,6 +4480,161 @@ jobs:
 
               // ---------------------------------------------------------------- adaptateur
 
+              // ---------------------------------------------------------------- retour vers la recherche / la catégorie
+
+              static boolean inside(File dir, File base) {
+                  if (base == null) return false;
+                  String b = base.getAbsolutePath();
+                  return dir.getAbsolutePath().startsWith(b.endsWith("/") ? b : b + "/");
+              }
+
+              void saveReturn(File entry) {
+                  ReturnState st = new ReturnState();
+                  st.mode = mode;
+                  st.kind = listKind;
+                  st.title = listTitle;
+                  st.sub = subText;
+                  st.query = searchEdit.getText().toString();
+                  st.status = searchStatus;
+                  st.items = new ArrayList<>(items);
+                  st.pos = listView.getFirstVisiblePosition();
+                  View v0 = listView.getChildAt(0);
+                  st.top = v0 == null ? 0 : v0.getTop() - listView.getPaddingTop();
+                  st.prevDir = prevDir;
+                  st.searchHome = searchHome;
+                  st.searchScope = searchScope;
+                  st.instant = instantMode;
+                  st.searchVer = searchVer;
+                  st.entry = entry;
+                  back = st;
+                  hideKeyboard();
+              }
+
+              void restoreReturn() {
+                  final ReturnState st = back;
+                  back = null;
+                  selected.clear();
+                  scanGen++;
+                  searchGen.incrementAndGet();
+                  prevDir = st.prevDir;
+                  if (st.mode == M_SEARCH) {
+                      mode = M_SEARCH;
+                      searchHome = st.searchHome;
+                      searchScope = st.searchScope;
+                      if (instantMode != st.instant) {
+                          instantMode = st.instant;
+                          prefs.edit().putBoolean("smode", instantMode).apply();
+                      }
+                      showListUi("Recherche", true, false);
+                      loading.setVisibility(View.GONE);
+                      content.addView(historyView, new FrameLayout.LayoutParams(-1, -1));
+                      historyView.setVisibility(View.GONE);
+                      suppressWatcher = true;
+                      searchEdit.setText(st.query);
+                      searchEdit.setSelection(searchEdit.getText().length());
+                      suppressWatcher = false;
+                      searchQuery = st.query.trim();
+                      searchStatus = st.status;
+                      searchVer = st.searchVer;
+                      buildTypeChips();
+                      buildSearchStatus();
+                      if (searchQuery.isEmpty() && !instantMode) showHistory();
+                  } else {
+                      mode = M_LIST;
+                      listKind = st.kind;
+                      showListUi(st.title, false, false);
+                      loading.setVisibility(View.GONE);
+                      subText = st.sub;
+                  }
+                  items.addAll(st.items);
+                  adapter.notifyDataSetChanged();
+                  listView.setSelectionFromTop(Math.min(st.pos, Math.max(0, items.size() - 1)), st.top);
+                  updateHeader();
+                  updateEmpty();
+                  if (mode == M_LIST) loadList(true);
+              }
+
+              // ---------------------------------------------------------------- récents
+
+              View sectionWithAction(String title, String action, View.OnClickListener l) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setOrientation(LinearLayout.HORIZONTAL);
+                  r.setGravity(Gravity.BOTTOM);
+                  r.addView(section(title), new LinearLayout.LayoutParams(0, -2, 1));
+                  TextView a = text(action, 13, hi(), true);
+                  a.setPadding(dp(12), dp(18), dp(8), dp(8));
+                  a.setBackground(ripple(true));
+                  a.setOnClickListener(l);
+                  r.addView(a);
+                  return r;
+              }
+
+              void removeRecent(String path) {
+                  List<String> r = recents();
+                  r.remove(path);
+                  prefs.edit().putString("rec", TextUtils.join("\n", r)).apply();
+              }
+
+              void confirmClearRecents() {
+                  new AlertDialog.Builder(this).setTitle("Effacer les fichiers récents ?")
+                          .setMessage("L'historique des fichiers ouverts sera vidé. Les fichiers eux-mêmes ne sont pas supprimés.")
+                          .setPositiveButton("Effacer", (d, w) -> {
+                              prefs.edit().remove("rec").apply();
+                              toast("Historique des récents effacé");
+                              if (mode == M_HOME) showHome();
+                          }).setNegativeButton("Annuler", null).show();
+              }
+
+              View recentRow(final File f, final LinearLayout box, final View head) {
+                  final LinearLayout r = new LinearLayout(this);
+                  r.setOrientation(LinearLayout.HORIZONTAL);
+                  r.setGravity(Gravity.CENTER_VERTICAL);
+                  r.setPadding(dp(12), dp(8), dp(4), dp(8));
+                  r.setBackground(ripple(false));
+                  r.setOnClickListener(v -> openFile(f));
+                  View ic = new View(this);
+                  ic.setBackground(new FileIcon(f.isDirectory(), ext(f), dark));
+                  r.addView(ic, new LinearLayout.LayoutParams(dp(38), dp(38)));
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setPadding(dp(12), 0, dp(4), 0);
+                  TextView a = text(f.getName(), 15, cText, false);
+                  a.setSingleLine(true);
+                  a.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                  TextView b = text(fmtSize(f.length()) + "  •  " + f.getParent(), 12, cSub, false);
+                  b.setSingleLine(true);
+                  b.setEllipsize(TextUtils.TruncateAt.START);
+                  c.addView(a);
+                  c.addView(b);
+                  r.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                  final Runnable remove = () -> {
+                      removeRecent(f.getAbsolutePath());
+                      box.removeView(r);
+                      if (box.getChildCount() == 0) {
+                          head.setVisibility(View.GONE);
+                          box.setVisibility(View.GONE);
+                      }
+                  };
+                  TextView x = text("✕", 16, cSub, false);
+                  x.setGravity(Gravity.CENTER);
+                  x.setPadding(dp(12), dp(8), dp(12), dp(8));
+                  x.setBackground(ripple(true));
+                  x.setOnClickListener(v -> remove.run());
+                  r.addView(x);
+                  r.setOnLongClickListener(v -> {
+                      String[] opts = {"📂  Ouvrir", "📁  Afficher dans le dossier", "🕘  Retirer des récents"};
+                      new AlertDialog.Builder(this).setTitle(f.getName()).setItems(opts, (d, w) -> {
+                          if (w == 0) openFile(f);
+                          else if (w == 1) {
+                              File p = f.getParentFile();
+                              if (p != null) browse(p, f);
+                          } else remove.run();
+                      }).show();
+                      return true;
+                  });
+                  return r;
+              }
+
               static class Holder {
                   TextView icon, name, details, path, check;
                   ImageView thumb;
@@ -3681,8 +4713,8 @@ jobs:
                           h.path.setVisibility(View.VISIBLE);
                           h.path.setText(f.getParent());
                       } else h.path.setVisibility(View.GONE);
-                      h.icon.setText(emoji(f));
-                      h.icon.setBackground(round(soft(typeColor(f)), 12));
+                      h.icon.setText("");
+                      h.icon.setBackground(new FileIcon(dir, ext(f), dark));
                       h.thumb.setTag(key);
                       h.thumb.setImageDrawable(null);
                       h.thumb.setVisibility(View.GONE);
@@ -3723,7 +4755,17 @@ jobs:
               private Norm() {
               }
 
+              /** Minuscules et sans accents. */
               static String of(String s) {
+                  return core(s, true);
+              }
+
+              /** Sans accents mais en gardant les majuscules (recherche sensible à la casse). */
+              static String strip(String s) {
+                  return core(s, false);
+              }
+
+              private static String core(String s, boolean low) {
                   int n = s.length();
                   boolean lower = true;
                   int i = 0;
@@ -3732,7 +4774,7 @@ jobs:
                       if (c >= 128) break;
                       if (c >= 'A' && c <= 'Z') lower = false;
                   }
-                  if (i == n) return lower ? s : s.toLowerCase(Locale.ROOT);
+                  if (i == n) return (lower || !low) ? s : s.toLowerCase(Locale.ROOT);
                   String d = Normalizer.normalize(s, Normalizer.Form.NFKD);
                   StringBuilder b = new StringBuilder(d.length());
                   for (i = 0; i < d.length(); i++) {
@@ -3741,13 +4783,18 @@ jobs:
                       if (t == Character.NON_SPACING_MARK || t == Character.ENCLOSING_MARK
                               || t == Character.COMBINING_SPACING_MARK) continue;
                       switch (c) {
-                          case 'œ': case 'Œ': b.append("oe"); break;
-                          case 'æ': case 'Æ': b.append("ae"); break;
+                          case 'œ': b.append("oe"); break;
+                          case 'Œ': b.append(low ? "oe" : "OE"); break;
+                          case 'æ': b.append("ae"); break;
+                          case 'Æ': b.append(low ? "ae" : "AE"); break;
                           case 'ß': b.append("ss"); break;
-                          case 'ø': case 'Ø': b.append('o'); break;
-                          case 'đ': case 'Đ': b.append('d'); break;
-                          case 'ł': case 'Ł': b.append('l'); break;
-                          default: b.append(Character.toLowerCase(c));
+                          case 'ø': b.append('o'); break;
+                          case 'Ø': b.append(low ? 'o' : 'O'); break;
+                          case 'đ': b.append('d'); break;
+                          case 'Đ': b.append(low ? 'd' : 'D'); break;
+                          case 'ł': b.append('l'); break;
+                          case 'Ł': b.append(low ? 'l' : 'L'); break;
+                          default: b.append(low ? Character.toLowerCase(c) : c);
                       }
                   }
                   return b.toString();
@@ -3783,6 +4830,9 @@ jobs:
                   long[] size;
                   long[] mtime;
                   byte[] flags;
+                  byte[] type;
+                  int[] byName;
+                  String[] stripCase, lowerAcc;
 
                   String path(int i) {
                       String d = dirs[parent[i]];
@@ -3997,6 +5047,7 @@ jobs:
                   s.size = new long[s.n];
                   s.mtime = new long[s.n];
                   s.flags = new byte[s.n];
+                  s.type = new byte[s.n];
                   ArrayList<String> dirs = new ArrayList<>();
                   java.util.HashMap<String, Integer> map = new java.util.HashMap<>();
                   for (int i = 0; i < s.n; i++) {
@@ -4010,6 +5061,7 @@ jobs:
                       s.parent[i] = d;
                       s.name[i] = r[1];
                       s.norm[i] = Norm.of(r[1]);
+                      s.type[i] = InstantSearch.typeOf(r[1]);
                   }
                   s.dirs = dirs.toArray(new String[0]);
                   return s;
