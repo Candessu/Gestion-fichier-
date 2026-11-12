@@ -1,4 +1,4 @@
-# Fichiers Pro 2.2 — gestionnaire de fichiers Android (APK native)
+# Fichiers Pro 2.3 — gestionnaire de fichiers Android (APK native)
 # Mettre ce fichier dans GitHub : .github/workflows/fichiers-pro.yml
 # Puis : onglet Actions > "Construire Fichiers Pro" > Run workflow.
 # L'APK se télécharge dans l'onglet Actions > dernier build > Artifacts.
@@ -60,8 +60,8 @@ jobs:
                   applicationId 'com.fichierspro.app'
                   minSdk 26
                   targetSdk 34
-                  versionCode 4
-                  versionName '2.2'
+                  versionCode 5
+                  versionName '2.3'
               }
               signingConfigs {
                   release {
@@ -97,6 +97,9 @@ jobs:
               <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
               <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+              <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+              <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
               <application
                   android:allowBackup="true"
@@ -169,6 +172,166 @@ jobs:
                   <path android:fillColor="#14213D" android:fillAlpha="0.35" android:pathData="M247,110 h46 a3,3 0 0 1 3,3 v0 a3,3 0 0 1 -3,3 h-46 a3,3 0 0 1 -3,-3 v-0 a3,3 0 0 1 3,-3 z" />
               </group>
           </vector>
+          FIN_DU_FICHIER
+          mkdir -p app/src/main/java/com/fichierspro/app
+          cat > app/src/main/java/com/fichierspro/app/AppStore.java << 'FIN_DU_FICHIER'
+          package com.fichierspro.app;
+
+          import android.app.AppOpsManager;
+          import android.app.usage.StorageStats;
+          import android.app.usage.StorageStatsManager;
+          import android.content.Context;
+          import android.content.pm.ApplicationInfo;
+          import android.content.pm.PackageInfo;
+          import android.content.pm.PackageManager;
+          import android.os.Process;
+          import android.os.storage.StorageManager;
+
+          import java.io.File;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.UUID;
+
+          /**
+           * Applications installées et place réelle qu'elles occupent.
+           * Avec l'accès « données d'utilisation » : appli + données + cache (comme dans les paramètres Android).
+           * Sans cet accès : seulement la taille des fichiers APK installés.
+           */
+          final class AppStore {
+              private AppStore() {
+              }
+
+              static final class App {
+                  String pkg, label, version, sourceDir;
+                  String[] splits;
+                  long app, data, cache, total, installed, updated;
+                  boolean system;
+              }
+
+              interface Progress {
+                  void at(int done, int total);
+              }
+
+              private static ArrayList<App> cache;
+              private static long cacheTime;
+              private static boolean cacheSized;
+
+              static synchronized ArrayList<App> cached() {
+                  return cache;
+              }
+
+              static synchronized boolean fresh(long maxAgeMs, boolean sized) {
+                  return cache != null && cacheSized == sized && System.currentTimeMillis() - cacheTime < maxAgeMs;
+              }
+
+              static synchronized void invalidate() {
+                  cacheTime = 0;
+              }
+
+              /** Dernier état connu de l'autorisation (pour l'affichage, sans appel système). */
+              static volatile boolean hasUsageCached;
+
+              static boolean hasUsage(Context c) {
+                  boolean r = checkUsage(c);
+                  hasUsageCached = r;
+                  return r;
+              }
+
+              @SuppressWarnings("deprecation")
+              private static boolean checkUsage(Context c) {
+                  try {
+                      AppOpsManager ao = (AppOpsManager) c.getSystemService(Context.APP_OPS_SERVICE);
+                      int m = ao.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.getPackageName());
+                      if (m == AppOpsManager.MODE_DEFAULT)
+                          return c.checkCallingOrSelfPermission(android.Manifest.permission.PACKAGE_USAGE_STATS)
+                                  == PackageManager.PERMISSION_GRANTED;
+                      return m == AppOpsManager.MODE_ALLOWED;
+                  } catch (Throwable t) {
+                      return false;
+                  }
+              }
+
+              private static long len(String p) {
+                  return p == null ? 0 : new File(p).length();
+              }
+
+              static ArrayList<App> load(Context c, Progress p) {
+                  PackageManager pm = c.getPackageManager();
+                  List<PackageInfo> pis;
+                  try {
+                      pis = pm.getInstalledPackages(0);
+                  } catch (Throwable t) {
+                      pis = new ArrayList<>();
+                  }
+                  boolean sized = hasUsage(c);
+                  StorageStatsManager ssm = null;
+                  if (sized) {
+                      try {
+                          ssm = (StorageStatsManager) c.getSystemService(Context.STORAGE_STATS_SERVICE);
+                      } catch (Throwable ignored) {
+                      }
+                  }
+                  ArrayList<App> out = new ArrayList<>(pis.size());
+                  int i = 0;
+                  for (PackageInfo pi : pis) {
+                      ApplicationInfo ai = pi.applicationInfo;
+                      i++;
+                      if (ai == null) continue;
+                      App a = new App();
+                      a.pkg = pi.packageName;
+                      try {
+                          a.label = String.valueOf(ai.loadLabel(pm));
+                      } catch (Throwable t) {
+                          a.label = a.pkg;
+                      }
+                      a.version = pi.versionName;
+                      a.installed = pi.firstInstallTime;
+                      a.updated = pi.lastUpdateTime;
+                      a.system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+                      a.sourceDir = ai.sourceDir;
+                      a.splits = ai.splitSourceDirs;
+                      long apk = len(ai.sourceDir);
+                      if (ai.splitSourceDirs != null) for (String s : ai.splitSourceDirs) apk += len(s);
+                      boolean ok = false;
+                      if (ssm != null) {
+                          try {
+                              UUID u = ai.storageUuid != null ? ai.storageUuid : StorageManager.UUID_DEFAULT;
+                              StorageStats st = ssm.queryStatsForPackage(u, a.pkg, Process.myUserHandle());
+                              a.app = st.getAppBytes();
+                              a.data = st.getDataBytes();
+                              a.cache = st.getCacheBytes();
+                              ok = true;
+                          } catch (Throwable ignored) {
+                          }
+                      }
+                      if (!ok) a.app = apk;
+                      a.total = a.app + a.data;
+                      out.add(a);
+                      if (p != null && (i % 8 == 0 || i == pis.size())) p.at(i, pis.size());
+                  }
+                  synchronized (AppStore.class) {
+                      cache = out;
+                      cacheTime = System.currentTimeMillis();
+                      cacheSized = sized;
+                  }
+                  return out;
+              }
+
+              /** {nombre, total, appli, données hors cache, cache} */
+              static long[] totals(List<App> l, boolean withSystem) {
+                  long[] r = new long[5];
+                  if (l == null) return r;
+                  for (App a : l) {
+                      if (!withSystem && a.system) continue;
+                      r[0]++;
+                      r[1] += a.total;
+                      r[2] += a.app;
+                      r[3] += Math.max(0, a.data - a.cache);
+                      r[4] += a.cache;
+                  }
+                  return r;
+              }
+          }
           FIN_DU_FICHIER
           mkdir -p app/src/main/java/com/fichierspro/app
           cat > app/src/main/java/com/fichierspro/app/EditorActivity.java << 'FIN_DU_FICHIER'
@@ -1860,6 +2023,7 @@ jobs:
           import android.content.res.ColorStateList;
           import android.graphics.Bitmap;
           import android.graphics.BitmapFactory;
+          import android.graphics.Canvas;
           import android.graphics.Color;
           import android.graphics.Typeface;
           import android.graphics.drawable.ColorDrawable;
@@ -1938,7 +2102,7 @@ jobs:
 
           public class MainActivity extends Activity {
 
-              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4, M_ANALYSIS = 5;
+              static final int M_PERM = -1, M_HOME = 0, M_BROWSE = 1, M_LIST = 2, M_TRASH = 3, M_SEARCH = 4, M_ANALYSIS = 5, M_APPS = 6;
 
               static final Set<String> IMG = set("jpg jpeg png gif bmp webp heic heif");
               static final Set<String> VID = set("mp4 mkv avi mov 3gp webm flv wmv m4v ts");
@@ -2076,6 +2240,14 @@ jobs:
                       loadDir(currentDir, listView.getFirstVisiblePosition(), null);
                   }
                   if (index != null && hasPerm()) index.syncIfStale(30000);
+                  if (mode == M_APPS && appsDirty) {
+                      appsDirty = false;
+                      buildAppsBanner();
+                      loadApps();
+                  } else if (mode == M_ANALYSIS && appsDirty) {
+                      appsDirty = false;
+                      refresh();
+                  }
               }
 
               @Override
@@ -2110,6 +2282,13 @@ jobs:
                   }
                   if (mode == M_ANALYSIS) {
                       anaBack();
+                      return;
+                  }
+                  if (mode == M_APPS) {
+                      ReturnState st = appsBack;
+                      appsBack = null;
+                      if (st != null) restoreAna(st);
+                      else showHome();
                       return;
                   }
                   if (mode == M_LIST && listBack != null) {
@@ -2623,7 +2802,7 @@ jobs:
                               tvSub.setText(subText);
                       }
                       if (mode == M_SEARCH) topActions.addView(iconBtn("✕", v -> searchEdit.setText("")));
-                      else if (mode != M_TRASH && mode != M_PERM) topActions.addView(iconBtn("🔍", v -> openSearch()));
+                      else if (mode != M_TRASH && mode != M_PERM && mode != M_APPS) topActions.addView(iconBtn("🔍", v -> openSearch()));
                       if (mode != M_PERM) topActions.addView(iconBtn("⋮", this::mainMenu));
                   }
                   updateBottom();
@@ -2699,8 +2878,9 @@ jobs:
                   col.addView(section("Catégories"));
                   Object[][] tiles = {
                           {"🖼", "Images", 0xFF43A047, 1}, {"🎬", "Vidéos", 0xFFE53935, 2}, {"🎵", "Audio", 0xFF8E24AA, 3},
-                          {"📄", "Documents", 0xFF1E88E5, 4}, {"🤖", "APK", 0xFF7CB342, 5}, {"🗜", "Archives", 0xFF6D4C41, 6},
-                          {"⬇", "Téléchargements", 0xFF00897B, "dl"}, {"📊", "Gros fichiers", 0xFFF4511E, "big"}, {"🗑", "Corbeille", 0xFF546E7A, "trash"}};
+                          {"📄", "Documents", 0xFF1E88E5, 4}, {"🤖", "Fichiers APK", 0xFF7CB342, 5}, {"🗜", "Archives", 0xFF6D4C41, 6},
+                          {"⬇", "Téléchargements", 0xFF00897B, "dl"}, {"📊", "Gros fichiers", 0xFFF4511E, "big"}, {"🗑", "Corbeille", 0xFF546E7A, "trash"},
+                          {"📱", "Applications", 0xFF00ACC1, "apps"}, {"📊", "Analyse", 0xFF3949AB, "ana"}};
                   LinearLayout row = null;
                   tileCounts = new TextView[tiles.length];
                   for (int i = 0; i < tiles.length; i++) {
@@ -2736,6 +2916,14 @@ jobs:
                       LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
                       lp.setMargins(dp(4), dp(4), dp(4), dp(4));
                       row.addView(tile, lp);
+                  }
+                  if (row != null) {
+                      for (int k = row.getChildCount(); k < 3; k++) {
+                          View spc = new View(this);
+                          LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(1), 1);
+                          lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+                          row.addView(spc, lp);
+                      }
                   }
 
                   Set<String> favs = favorites();
@@ -2900,6 +3088,10 @@ jobs:
                       browse(d, null);
                   } else if ("big".equals(k)) {
                       showCategory("Gros fichiers (> 10 Mo)", FileIndex.BIG);
+                  } else if ("apps".equals(k)) {
+                      showApps(null);
+                  } else if ("ana".equals(k)) {
+                      showAnalysis(internalRoot(), null);
                   } else {
                       showTrash();
                   }
@@ -3079,7 +3271,15 @@ jobs:
                           if (mode != M_HOME || tc != tileCounts) return;
                           for (int i = 0; i < 6; i++) tc[i].setText(tileText(st[i + 1]));
                           tc[7].setText(tileText(st[0]));
+                          if (tc.length > 9) tc[9].setText(appsTileText());
+                          if (tc.length > 10) tc[10].setText("1 clic");
                       });
+                      if (!AppStore.fresh(30 * 60 * 1000L, AppStore.hasUsage(this))) {
+                          saveAppTotals(AppStore.load(this, null));
+                          ui.post(() -> {
+                              if (mode == M_HOME && tc == tileCounts && tc.length > 9) tc[9].setText(appsTileText());
+                          });
+                      }
                   });
               }
 
@@ -3605,6 +3805,9 @@ jobs:
                       case M_ANALYSIS:
                           loadAnalysis(anaScroll != null ? anaScroll.getScrollY() : 0);
                           break;
+                      case M_APPS:
+                          if (appsAdapter != null) appsAdapter.notifyDataSetChanged();
+                          break;
                   }
               }
 
@@ -3725,6 +3928,13 @@ jobs:
                       m.add(0, 20, 0, "♻  Tout restaurer");
                       m.add(0, 21, 1, "🗑  Vider la corbeille");
                   }
+                  if (mode == M_APPS) {
+                      m.add(0, 70, 0, "↕  Trier les applications…");
+                      m.add(0, 71, 1, "Afficher les applications système").setCheckable(true).setChecked(prefs.getBoolean("app_sys", false));
+                      m.add(0, 72, 2, "🔄  Recalculer les tailles");
+                      if (!AppStore.hasUsage(this)) m.add(0, 73, 3, "🔓  Autoriser l'accès aux tailles réelles");
+                      m.add(0, 74, 4, "⚙  Stockage Android (Paramètres)");
+                  }
                   if (mode == M_ANALYSIS) {
                       m.add(0, 60, 0, "📂  Ouvrir ce dossier");
                       m.add(0, 6, 1, "🔄  Actualiser");
@@ -3792,6 +4002,26 @@ jobs:
                           case 60:
                               anaOpenFolder(anaDir, null);
                               break;
+                          case 70:
+                              appsMenuSort();
+                              break;
+                          case 71: {
+                              prefs.edit().putBoolean("app_sys", !prefs.getBoolean("app_sys", false)).apply();
+                              ArrayList<AppStore.App> c = AppStore.cached();
+                              if (c != null) showAppList(c, true);
+                              break;
+                          }
+                          case 72:
+                              AppStore.invalidate();
+                              loading.setVisibility(View.VISIBLE);
+                              loadApps();
+                              break;
+                          case 73:
+                              requestUsageAccess();
+                              break;
+                          case 74:
+                              openAndroidStorage();
+                              break;
                           case 62:
                               showAnalysis(internalRoot(), null);
                               break;
@@ -3841,9 +4071,9 @@ jobs:
                               browse(new File("/"), null);
                               break;
                           case 31:
-                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.2")
+                              new AlertDialog.Builder(this).setTitle("Fichiers Pro 2.3")
                                       .setMessage("Gestionnaire de fichiers complet :\n\n• Explorer, copier, couper, coller\n• Corbeille avec restauration\n"
-                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Analyse du stockage en 1 clic (dossiers, types, gros fichiers)\n• Catégories et gros fichiers indexés\n"
+                                              + "• Compression et extraction ZIP\n• Recherche globale classée et recherche instantanée avec filtres\n• Icônes selon le format (Word, PDF, Excel, PowerPoint…)\n• Analyse du stockage en 1 clic (dossiers, types, gros fichiers)\n• Applications installées : taille réelle (appli, données, cache)\n• Catégories et gros fichiers indexés\n"
                                               + "• Miniatures photos et vidéos\n• Éditeur de texte intégré\n• Favoris, récents, MD5, thème sombre")
                                       .setPositiveButton("OK", null).show();
                               break;
@@ -4617,7 +4847,7 @@ jobs:
               // ---------------------------------------------------------------- analyse du stockage (tout sur un écran)
 
               static final int[] CAT_COLORS = {0, 0xFF43A047, 0xFFE53935, 0xFF8E24AA, 0xFF1E88E5, 0xFF7CB342, 0xFFF9A825, 0xFF90A4AE};
-              static final String[] CAT_NAMES = {"", "Images", "Vidéos", "Audio", "Documents", "APK", "Archives", "Autres fichiers"};
+              static final String[] CAT_NAMES = {"", "Images", "Vidéos", "Audio", "Documents", "Fichiers APK", "Archives", "Autres fichiers"};
 
               File anaDir, anaRoot, anaReturn;
               ScrollView anaScroll;
@@ -4632,6 +4862,8 @@ jobs:
                   ArrayList<IFile> big;
                   long[] bigStats;
                   long trash, dirTotal, dirCount;
+                  long apps, appsN;
+                  boolean appsKnown, appsSized;
               }
 
               /** Point d'entrée : un appui sur le pourcentage de stockage. */
@@ -4740,11 +4972,27 @@ jobs:
                           d.dirTotal += c.size;
                           d.dirCount += c.count;
                       }
-                      if (root && internal) d.trash = sizeRec(trashDir());
+                      if (root && internal) {
+                          d.trash = sizeRec(trashDir());
+                          fillApps(d);
+                      }
                       ui.post(() -> {
                           if (gen != scanGen || mode != M_ANALYSIS || !dir.equals(anaDir)) return;
                           renderAnalysis(d, root);
                           anaScroll.post(() -> anaScroll.scrollTo(0, restoreY));
+                          if (root && internal && !AppStore.fresh(5 * 60 * 1000L, AppStore.hasUsage(this))) {
+                              bg.execute(() -> {
+                                  ArrayList<AppStore.App> l = AppStore.load(this, null);
+                                  saveAppTotals(l);
+                                  fillApps(d);
+                                  ui.post(() -> {
+                                      if (mode != M_ANALYSIS || !dir.equals(anaDir) || anaScroll == null) return;
+                                      int y = anaScroll.getScrollY();
+                                      renderAnalysis(d, true);
+                                      anaScroll.post(() -> anaScroll.scrollTo(0, y));
+                                  });
+                              });
+                          }
                       });
                   });
               }
@@ -4858,9 +5106,9 @@ jobs:
                       h.addView(tc, new LinearLayout.LayoutParams(0, -2, 1));
                       h.addView(text(p + " %", 30, p > 90 ? 0xFFE53935 : hi(), true));
                       c1.addView(h);
-                      long sys = Math.max(0, used - catSum - d.trash);
-                      long[] sizes = new long[10];
-                      int[] cols = new int[10];
+                      long sys = Math.max(0, used - catSum - d.trash - d.apps);
+                      long[] sizes = new long[11];
+                      int[] cols = new int[11];
                       for (int k = 1; k <= 7; k++) {
                           sizes[k - 1] = d.cats[k][1];
                           cols[k - 1] = CAT_COLORS[k];
@@ -4869,8 +5117,10 @@ jobs:
                       cols[7] = 0xFF8D6E63;
                       sizes[8] = sys;
                       cols[8] = 0xFF546E7A;
-                      sizes[9] = d.free;
-                      cols[9] = cDivider;
+                      sizes[9] = d.apps;
+                      cols[9] = 0xFF00ACC1;
+                      sizes[10] = d.free;
+                      cols[10] = cDivider;
                       c1.addView(stackBar(sizes, cols));
                   } else {
                       LinearLayout h = new LinearLayout(this);
@@ -4891,6 +5141,21 @@ jobs:
                       }
                       c1.addView(stackBar(sizes, cols));
                   }
+                  if (root && anaRoot.equals(internalRoot())) {
+                      if (d.appsKnown) {
+                          c1.addView(legendRow(0xFF00ACC1, "Applications installées  (" + fmtCount(d.appsN) + ")" + (d.appsSized ? "" : " *"),
+                                  d.apps, pct(d.apps, used), v -> showApps(anaState())));
+                          if (!d.appsSized) {
+                              TextView hint = text("* taille des APK seulement. Appuyez pour autoriser l'accès et voir la place réelle "
+                                      + "(données et cache compris)  ›", 12, hi(), false);
+                              hint.setPadding(dp(40), 0, dp(16), dp(8));
+                              hint.setOnClickListener(v -> requestUsageAccess());
+                              c1.addView(hint);
+                          }
+                      } else {
+                          c1.addView(legendRow(0xFF00ACC1, "Applications installées  (calcul…)", 0, "", v -> showApps(anaState())));
+                      }
+                  }
                   Integer[] order = {1, 2, 3, 4, 5, 6, 7};
                   java.util.Arrays.sort(order, (a, b) -> Long.compare(d.cats[b][1], d.cats[a][1]));
                   long base = root ? used : d.dirTotal;
@@ -4902,8 +5167,9 @@ jobs:
                   }
                   if (root) {
                       if (d.trash > 0) c1.addView(legendRow(0xFF8D6E63, "Corbeille", d.trash, pct(d.trash, used), v -> showTrash()));
-                      long sys = Math.max(0, used - catSum - d.trash);
-                      if (sys > 0) c1.addView(legendRow(0xFF546E7A, "Système, applications et données", sys, pct(sys, used), null));
+                      final long sys = Math.max(0, used - catSum - d.trash - d.apps);
+                      if (sys > 0) c1.addView(legendRow(0xFF546E7A, d.appsKnown ? "Système Android et autres" : "Système, applications et données",
+                              sys, pct(sys, used), v -> systemDetail(d, sys)));
                       c1.addView(legendRow(cDivider, "Espace libre", d.free, pct(d.free, d.total), null));
                   }
                   View sp = new View(this);
@@ -5091,6 +5357,456 @@ jobs:
                   usageChip.setText("◔ " + p + " % utilisé");
                   usageChip.setOnClickListener(v -> showAnalysis(r, currentDir));
                   usageChip.setVisibility(View.VISIBLE);
+              }
+
+              // ---------------------------------------------------------------- applications installées
+
+              ListView appsList;
+              AppAdapter appsAdapter;
+              final ArrayList<AppStore.App> apps = new ArrayList<>();
+              ReturnState appsBack;
+              boolean appsDirty;
+              TextView appsSummary;
+              LinearLayout appsBanner;
+              LruCache<String, Bitmap> appIcons;
+              final Set<String> iconPending = Collections.synchronizedSet(new HashSet<String>());
+              int appsGen;
+
+              void saveAppTotals(List<AppStore.App> l) {
+                  long[] t = AppStore.totals(l, true);
+                  prefs.edit().putLong("apps_total", t[1]).putLong("apps_n", t[0])
+                          .putLong("apps_user_n", AppStore.totals(l, false)[0])
+                          .putBoolean("apps_sized", AppStore.hasUsage(this)).apply();
+              }
+
+              String appsTileText() {
+                  long n = prefs.getLong("apps_user_n", -1);
+                  if (n < 0) return "Taille réelle";
+                  return fmtCount(n) + " • " + fmtSize(prefs.getLong("apps_total", 0));
+              }
+
+              void showApps(ReturnState backTo) {
+                  back = null;
+                  listBack = null;
+                  appsBack = backTo;
+                  mode = M_APPS;
+                  selected.clear();
+                  scanGen++;
+                  listTitle = "Applications installées";
+                  subText = "Calcul de la place occupée…";
+                  btnBack.setVisibility(View.VISIBLE);
+                  crumbScroll.setVisibility(View.GONE);
+                  if (appIcons == null) {
+                      appIcons = new LruCache<String, Bitmap>(8 * 1024) {
+                          @Override
+                          protected int sizeOf(String k, Bitmap b) {
+                              return Math.max(1, b.getByteCount() / 1024);
+                          }
+                      };
+                  }
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  appsBanner = new LinearLayout(this);
+                  appsBanner.setOrientation(LinearLayout.VERTICAL);
+                  col.addView(appsBanner);
+                  appsSummary = text("", 12, cSub, false);
+                  appsSummary.setPadding(dp(16), dp(8), dp(16), dp(8));
+                  appsSummary.setBackgroundColor(cCard);
+                  col.addView(appsSummary);
+                  appsList = new ListView(this);
+                  appsList.setDivider(new ColorDrawable(cDivider));
+                  appsList.setDividerHeight(1);
+                  appsList.setFastScrollEnabled(true);
+                  appsAdapter = new AppAdapter();
+                  appsList.setAdapter(appsAdapter);
+                  appsList.setOnItemClickListener((p, v, pos, id) -> {
+                      if (pos < apps.size()) appDialog(apps.get(pos));
+                  });
+                  col.addView(appsList, new LinearLayout.LayoutParams(-1, 0, 1));
+                  content.removeAllViews();
+                  content.addView(col, new FrameLayout.LayoutParams(-1, -1));
+                  loading.setVisibility(View.VISIBLE);
+                  content.addView(loading, new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
+                  apps.clear();
+                  appsAdapter.notifyDataSetChanged();
+                  buildAppsBanner();
+                  updateHeader();
+                  ArrayList<AppStore.App> c = AppStore.cached();
+                  if (c != null) {
+                      showAppList(c, true);
+                      subText = subText + "  •  mise à jour…";
+                      updateHeader();
+                  }
+                  loadApps();
+              }
+
+              void buildAppsBanner() {
+                  appsBanner.removeAllViews();
+                  if (AppStore.hasUsage(this)) return;
+                  LinearLayout b = new LinearLayout(this);
+                  b.setOrientation(LinearLayout.VERTICAL);
+                  b.setPadding(dp(16), dp(12), dp(16), dp(12));
+                  b.setBackgroundColor(soft(0xFFF9A825));
+                  b.addView(text("⚠  Tailles incomplètes", 14, cText, true));
+                  TextView m = text("Sans autorisation, seule la taille des APK est connue. Pour voir la place réelle "
+                          + "(appli + données + cache, comme dans les Paramètres), autorisez « Accès aux données d'utilisation » "
+                          + "pour Fichiers Pro.", 13, cText, false);
+                  m.setPadding(0, dp(4), 0, dp(8));
+                  b.addView(m);
+                  TextView go = text("Autoriser l'accès  ›", 14, Color.WHITE, true);
+                  go.setPadding(dp(16), dp(8), dp(16), dp(8));
+                  go.setBackground(round(cPrimary, 18));
+                  go.setOnClickListener(v -> requestUsageAccess());
+                  b.addView(go, new LinearLayout.LayoutParams(-2, -2));
+                  appsBanner.addView(b);
+              }
+
+              void requestUsageAccess() {
+                  appsDirty = true;
+                  AppStore.invalidate();
+                  try {
+                      Intent i = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                      i.setData(Uri.parse("package:" + getPackageName()));
+                      startActivity(i);
+                  } catch (Exception e) {
+                      try {
+                          startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+                      } catch (Exception e2) {
+                          toast("Ouvrez Paramètres > Applications > Accès spéciaux > Données d'utilisation");
+                      }
+                  }
+                  toast("Activez « Fichiers Pro » puis revenez");
+              }
+
+              void loadApps() {
+                  final int g = ++appsGen;
+                  bg.execute(() -> {
+                      final ArrayList<AppStore.App> l = AppStore.load(this, (done, total) -> ui.post(() -> {
+                          if (g == appsGen && mode == M_APPS && apps.isEmpty()) {
+                              subText = "Calcul… " + done + " / " + total;
+                              updateHeader();
+                          }
+                      }));
+                      saveAppTotals(l);
+                      ui.post(() -> {
+                          if (g != appsGen || mode != M_APPS) return;
+                          buildAppsBanner();
+                          showAppList(l, true);
+                      });
+                  });
+              }
+
+              void showAppList(List<AppStore.App> all, boolean done) {
+                  boolean sys = prefs.getBoolean("app_sys", false);
+                  final int sort = prefs.getInt("app_sort", 0);
+                  ArrayList<AppStore.App> l = new ArrayList<>();
+                  for (AppStore.App a : all) if (sys || !a.system) l.add(a);
+                  Collections.sort(l, (a, b) -> {
+                      switch (sort) {
+                          case 1:
+                              return a.label.compareToIgnoreCase(b.label);
+                          case 2:
+                              return Long.compare(b.installed, a.installed);
+                          case 3:
+                              return Long.compare(b.updated, a.updated);
+                          case 4:
+                              return Long.compare(b.data, a.data);
+                          case 5:
+                              return Long.compare(b.cache, a.cache);
+                          default:
+                              return Long.compare(b.total, a.total);
+                      }
+                  });
+                  int pos = appsList.getFirstVisiblePosition();
+                  View v0 = appsList.getChildAt(0);
+                  int top = v0 == null ? 0 : v0.getTop();
+                  apps.clear();
+                  apps.addAll(l);
+                  appsAdapter.notifyDataSetChanged();
+                  appsList.setSelectionFromTop(Math.min(pos, Math.max(0, apps.size() - 1)), top);
+                  if (done) loading.setVisibility(View.GONE);
+                  long[] t = AppStore.totals(l, true);
+                  boolean sized = AppStore.hasUsage(this);
+                  subText = fmtCount(t[0]) + " application(s)" + (sys ? "" : " (hors système)") + "  •  " + fmtSize(t[1]);
+                  String[] sorts = {"taille totale", "nom", "installation récente", "mise à jour récente", "données", "cache"};
+                  appsSummary.setText(sized
+                          ? "Appli " + fmtSize(t[2]) + "  •  Données " + fmtSize(t[3]) + "  •  Cache " + fmtSize(t[4])
+                          + "\nTri : " + sorts[Math.min(sort, sorts.length - 1)] + "   (⋮ pour changer)"
+                          : "Taille des APK : " + fmtSize(t[2]) + "   •   Tri : " + sorts[Math.min(sort, sorts.length - 1)]);
+                  updateHeader();
+              }
+
+              void appsMenuSort() {
+                  String[] opts = {"Taille totale (plus gros d'abord)", "Nom (A → Z)", "Installation récente",
+                          "Mise à jour récente", "Données (plus gros d'abord)", "Cache (plus gros d'abord)"};
+                  new AlertDialog.Builder(this).setTitle("Trier les applications")
+                          .setSingleChoiceItems(opts, prefs.getInt("app_sort", 0), (d, w) -> {
+                              prefs.edit().putInt("app_sort", w).apply();
+                              d.dismiss();
+                              ArrayList<AppStore.App> c = AppStore.cached();
+                              if (c != null) showAppList(c, true);
+                          }).setNegativeButton("Fermer", null).show();
+              }
+
+              void appDialog(final AppStore.App a) {
+                  boolean sized = AppStore.hasUsage(this);
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(dp(22), dp(8), dp(22), dp(4));
+                  StringBuilder sb = new StringBuilder();
+                  if (sized) {
+                      sb.append("Total : ").append(fmtSize(a.total)).append('\n');
+                      sb.append("Application : ").append(fmtSize(a.app)).append('\n');
+                      sb.append("Données : ").append(fmtSize(Math.max(0, a.data - a.cache))).append('\n');
+                      sb.append("Cache : ").append(fmtSize(a.cache)).append("\n\n");
+                  } else sb.append("Taille de l'APK : ").append(fmtSize(a.app)).append("\n\n");
+                  sb.append("Version : ").append(a.version == null ? "?" : a.version).append('\n');
+                  sb.append("Installée le : ").append(fmtDate(a.installed)).append('\n');
+                  sb.append("Mise à jour le : ").append(fmtDate(a.updated)).append('\n');
+                  sb.append("Paquet : ").append(a.pkg).append(a.system ? "\n(application système)" : "");
+                  TextView info = text(sb.toString(), 14, cText, false);
+                  info.setTextIsSelectable(true);
+                  info.setLineSpacing(0, 1.15f);
+                  box.addView(info);
+                  final AlertDialog[] dlg = new AlertDialog[1];
+                  Object[][] acts = {
+                          {"▶  Ouvrir", 0}, {"🧹  Vider le cache / les données (Paramètres)", 1},
+                          {"🗑  Désinstaller", 2}, {"📦  Extraire l'APK dans Download", 3}};
+                  for (Object[] x : acts) {
+                      final int id = (Integer) x[1];
+                      if (id == 2 && a.system) continue;
+                      TextView t = text((String) x[0], 15, id == 2 ? 0xFFE53935 : hi(), true);
+                      t.setPadding(dp(4), dp(12), dp(4), dp(12));
+                      t.setBackground(ripple(false));
+                      t.setOnClickListener(v -> {
+                          if (dlg[0] != null) dlg[0].dismiss();
+                          appAction(a, id);
+                      });
+                      box.addView(t);
+                  }
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(box);
+                  AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle(a.label).setView(sv)
+                          .setNegativeButton("Fermer", null);
+                  dlg[0] = b.create();
+                  dlg[0].show();
+              }
+
+              void appAction(AppStore.App a, int id) {
+                  try {
+                      if (id == 0) {
+                          Intent i = getPackageManager().getLaunchIntentForPackage(a.pkg);
+                          if (i == null) toast("Cette application n'a pas d'écran à ouvrir");
+                          else startActivity(i);
+                      } else if (id == 1) {
+                          appsDirty = true;
+                          AppStore.invalidate();
+                          Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                          i.setData(Uri.parse("package:" + a.pkg));
+                          startActivity(i);
+                          toast("Ouvrez « Stockage » puis « Vider le cache »");
+                      } else if (id == 2) {
+                          appsDirty = true;
+                          AppStore.invalidate();
+                          Intent i = new Intent(Intent.ACTION_DELETE);
+                          i.setData(Uri.parse("package:" + a.pkg));
+                          startActivity(i);
+                      } else {
+                          extractApk(a);
+                      }
+                  } catch (Exception e) {
+                      toast("Action impossible : " + e.getMessage());
+                  }
+              }
+
+              void extractApk(final AppStore.App a) {
+                  final File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "APK extraits");
+                  final String base = (a.label + "_" + (a.version == null ? "" : a.version)).replaceAll("[\\\\/:*?\"<>|]", "_");
+                  final boolean split = a.splits != null && a.splits.length > 0;
+                  runOp("Extraction de l'APK…", op -> {
+                      if (!dir.exists()) dir.mkdirs();
+                      File src = new File(a.sourceDir);
+                      long total = src.length();
+                      if (split) for (String s : a.splits) total += new File(s).length();
+                      op.total = total;
+                      File out = uniqueDest(dir, base + (split ? ".apks" : ".apk"));
+                      if (!split) {
+                          copyRec(src, out, op);
+                      } else {
+                          try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(out))) {
+                              zipAdd(zos, src, "base.apk", op);
+                              for (String s : a.splits) {
+                                  File f = new File(s);
+                                  zipAdd(zos, f, f.getName(), op);
+                              }
+                          }
+                      }
+                      if (op.cancel) out.delete();
+                      op.msg = "Enregistré : Download/APK extraits/" + out.getName()
+                              + (split ? " (appli en plusieurs parties : fichier .apks)" : "");
+                  }, null);
+              }
+
+              Bitmap iconBitmap(String pkg) {
+                  try {
+                      Drawable d = getPackageManager().getApplicationIcon(pkg);
+                      int s = dp(40);
+                      Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+                      Canvas c = new Canvas(b);
+                      d.setBounds(0, 0, s, s);
+                      d.draw(c);
+                      return b;
+                  } catch (Throwable t) {
+                      return null;
+                  }
+              }
+
+              static class AppHolder {
+                  ImageView icon;
+                  TextView name, sub, size;
+                  View bar, rest;
+              }
+
+              class AppAdapter extends BaseAdapter {
+                  @Override
+                  public int getCount() {
+                      return apps.size();
+                  }
+
+                  @Override
+                  public Object getItem(int p) {
+                      return apps.get(p);
+                  }
+
+                  @Override
+                  public long getItemId(int p) {
+                      return p;
+                  }
+
+                  @Override
+                  public View getView(int pos, View cv, ViewGroup parent) {
+                      AppHolder h;
+                      if (cv == null) {
+                          h = new AppHolder();
+                          LinearLayout outer = new LinearLayout(MainActivity.this);
+                          outer.setOrientation(LinearLayout.VERTICAL);
+                          outer.setPadding(dp(14), dp(10), dp(16), dp(8));
+                          outer.setForeground(ripple(false));
+                          LinearLayout row = new LinearLayout(MainActivity.this);
+                          row.setGravity(Gravity.CENTER_VERTICAL);
+                          h.icon = new ImageView(MainActivity.this);
+                          row.addView(h.icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
+                          LinearLayout c = new LinearLayout(MainActivity.this);
+                          c.setOrientation(LinearLayout.VERTICAL);
+                          c.setPadding(dp(14), 0, dp(8), 0);
+                          h.name = text("", 15, cText, true);
+                          h.name.setSingleLine(true);
+                          h.name.setEllipsize(TextUtils.TruncateAt.END);
+                          h.sub = text("", 12, cSub, false);
+                          h.sub.setSingleLine(true);
+                          h.sub.setEllipsize(TextUtils.TruncateAt.END);
+                          c.addView(h.name);
+                          c.addView(h.sub);
+                          row.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                          h.size = text("", 14, cText, true);
+                          row.addView(h.size);
+                          outer.addView(row);
+                          LinearLayout bar = new LinearLayout(MainActivity.this);
+                          bar.setOrientation(LinearLayout.HORIZONTAL);
+                          h.bar = new View(MainActivity.this);
+                          h.bar.setBackground(round(hi(), 2));
+                          h.rest = new View(MainActivity.this);
+                          bar.addView(h.bar, new LinearLayout.LayoutParams(0, -1, 0));
+                          bar.addView(h.rest, new LinearLayout.LayoutParams(0, -1, 1));
+                          LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, dp(4));
+                          blp.setMargins(dp(54), dp(6), 0, 0);
+                          outer.addView(bar, blp);
+                          cv = outer;
+                          cv.setTag(h);
+                      } else h = (AppHolder) cv.getTag();
+                      final AppStore.App a = apps.get(pos);
+                      boolean sized = AppStore.hasUsageCached;
+                      h.name.setText(a.label);
+                      h.sub.setText(sized ? "Appli " + fmtSize(a.app) + " • Données " + fmtSize(Math.max(0, a.data - a.cache))
+                              + " • Cache " + fmtSize(a.cache) : "APK " + fmtSize(a.app) + (a.system ? " • système" : ""));
+                      h.size.setText(fmtSize(a.total));
+                      long max = apps.isEmpty() ? 1 : Math.max(1, apps.get(0).total);
+                      for (AppStore.App x : apps) if (x.total > max) max = x.total;
+                      float f = Math.max(0.005f, Math.min(1f, (float) ((double) a.total / max)));
+                      ((LinearLayout.LayoutParams) h.bar.getLayoutParams()).weight = f;
+                      ((LinearLayout.LayoutParams) h.rest.getLayoutParams()).weight = 1f - f;
+                      h.bar.requestLayout();
+                      h.icon.setTag(a.pkg);
+                      Bitmap b = appIcons.get(a.pkg);
+                      if (b != null) h.icon.setImageBitmap(b);
+                      else {
+                          h.icon.setImageDrawable(null);
+                          final ImageView iv = h.icon;
+                          if (iconPending.add(a.pkg)) {
+                              thumbExec.execute(() -> {
+                                  Bitmap bm = iconBitmap(a.pkg);
+                                  iconPending.remove(a.pkg);
+                                  if (bm == null) return;
+                                  appIcons.put(a.pkg, bm);
+                                  ui.post(() -> {
+                                      if (a.pkg.equals(iv.getTag())) iv.setImageBitmap(bm);
+                                  });
+                              });
+                          }
+                      }
+                      return cv;
+                  }
+              }
+
+              void fillApps(AnaData d) {
+                  ArrayList<AppStore.App> c = AppStore.cached();
+                  if (c != null) {
+                      long[] t = AppStore.totals(c, true);
+                      d.apps = t[1];
+                      d.appsN = AppStore.totals(c, false)[0];
+                      d.appsKnown = true;
+                      d.appsSized = AppStore.hasUsageCached;
+                  } else if (prefs.getLong("apps_user_n", -1) >= 0) {
+                      d.apps = prefs.getLong("apps_total", 0);
+                      d.appsN = prefs.getLong("apps_user_n", 0);
+                      d.appsKnown = true;
+                      d.appsSized = prefs.getBoolean("apps_sized", false);
+                  }
+              }
+
+              void openAndroidStorage() {
+                  try {
+                      startActivity(new Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS));
+                  } catch (Exception e) {
+                      try {
+                          startActivity(new Intent(Settings.ACTION_SETTINGS));
+                      } catch (Exception ignored) {
+                      }
+                  }
+              }
+
+              /** Détail de la ligne « Système » : ce qu'elle contient et où agir. */
+              void systemDetail(AnaData d, long sys) {
+                  StringBuilder sb = new StringBuilder();
+                  sb.append("Cette part (").append(fmtSize(sys)).append(") n'est pas visible comme des fichiers :\n\n");
+                  sb.append("•  le système Android lui-même (mises à jour, partition système réservée)\n");
+                  sb.append("•  les fichiers temporaires et caches du système\n");
+                  sb.append("•  les dossiers Android/data et Android/obb, illisibles par les applis depuis Android 11\n");
+                  if (!d.appsKnown || !d.appsSized)
+                      sb.append("•  une partie des applications installées (données et cache) tant que l'accès aux tailles réelles n'est pas autorisé\n");
+                  if (d.appsKnown)
+                      sb.append("\nApplications installées : ").append(fmtSize(d.apps)).append(" (déjà comptées à part).\n");
+                  sb.append("\nPour libérer de la place ici : videz le cache des grosses applications, ou utilisez le nettoyage de stockage d'Android.");
+                  TextView tv = text(sb.toString(), 14, cText, false);
+                  tv.setLineSpacing(0, 1.2f);
+                  tv.setPadding(dp(22), dp(10), dp(22), dp(6));
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(tv);
+                  new AlertDialog.Builder(this).setTitle("Système Android et autres")
+                          .setView(sv)
+                          .setPositiveButton("Voir les applications", (dd, w) -> showApps(anaState()))
+                          .setNeutralButton("Stockage Android", (dd, w) -> openAndroidStorage())
+                          .setNegativeButton("Fermer", null).show();
               }
 
               // ---------------------------------------------------------------- retour vers la recherche / la catégorie
